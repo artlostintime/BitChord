@@ -127,6 +127,7 @@ fun SettingsScreen(
     onSignOut: () -> Unit,
     onAccountScrobbling: () -> Unit,
     onLyricsSources: () -> Unit,
+    onExtensions: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -320,6 +321,14 @@ fun SettingsScreen(
                 )
                 if (index < sources.lastIndex) RowDivider()
             }
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Extension,
+                title = "Extension store",
+                subtitle = "Browse and install SpotiFLAC extensions",
+                trailing = { Chevron() },
+                onClick = onExtensions,
+            )
         }
 
         SettingsGroup(header = "Playback") {

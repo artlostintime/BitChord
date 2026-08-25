@@ -130,6 +130,7 @@ import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.ui.screens.LibraryScreen
 import com.music.bitchord.ui.screens.SearchScreen
 import com.music.bitchord.ui.screens.SpotifyScreen
+import com.music.bitchord.ui.screens.ExtensionsScreen
 import com.music.bitchord.ui.theme.BitChordTheme
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.ui.theme.SystemBarIcons
@@ -200,6 +201,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
     var discordDialog by remember { mutableStateOf<DiscordDialog?>(null) }
     var showSpotify by remember { mutableStateOf(false) }
     var showSpotifyLogin by remember { mutableStateOf(false) }
+    var showExtensions by remember { mutableStateOf(false) }
     var songActions by remember { mutableStateOf<Song?>(null) }
     // Whether the player's album/artist lookup (below, for the current track)
     // is still in flight — read by the long-press sheet so it can show a
@@ -618,6 +620,9 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
         BackHandler(enabled = showSpotify) {
             showSpotify = false
         }
+        BackHandler(enabled = showExtensions) {
+            showExtensions = false
+        }
         BackHandler(enabled = showAccountScrobbling && !showDiscord) {
             showAccountScrobbling = false
         }
@@ -640,6 +645,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             targetState = when {
                 showDiscord -> "discord"
                 showSpotify -> "spotify"
+                showExtensions -> "extensions"
                 showAccountScrobbling -> "account_scrobbling"
                 showSettings -> "settings"
                 detail != null -> detail.browseId
@@ -667,6 +673,10 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onOpenLogin = { showSpotifyLogin = true },
                     onSignOut = { viewModel.spotifySignOut() },
                     onPlay = play,
+                    contentPadding = listPadding,
+                )
+            } else if (key == "extensions") {
+                ExtensionsScreen(
                     contentPadding = listPadding,
                 )
             } else if (key == "account_scrobbling") {
@@ -697,6 +707,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onSignOut = { viewModel.signOut() },
                     onAccountScrobbling = { showAccountScrobbling = true },
                     onLyricsSources = { showLyricsSources = true },
+                    onExtensions = { showExtensions = true },
                     contentPadding = listPadding,
                 )
             } else if (page != null && page.browseId.startsWith("local:")) {
