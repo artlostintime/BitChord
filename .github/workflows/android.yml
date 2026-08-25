@@ -56,24 +56,24 @@ jobs:
           RANGE="${PREV:+$PREV..}$TAG"
           log() { git log --pretty=format:'- %s' "$RANGE" | grep -Ei "^- $1" | sed -E 's/^- [a-z]+\(([^)]*)\): /*\1* — /I; s/^- [a-z]+: /*/I' || echo "- _none_"; }
           {
-            echo "## 📦 BitChord $TAG"
+            echo "## BitChord $TAG"
             echo
             if [[ "$TAG" == *-* ]]; then
-              echo "> 🚧 **Pre-release** — expect rough edges. Feedback welcome."
+              echo "> **Pre-release** — expect rough edges. Feedback welcome."
             else
-              echo "> ✅ **Stable release**"
+              echo "> **Stable release**"
             fi
             echo
-            echo "### ✨ New features"
+            echo "### New features"
             log 'feat'
             echo
-            echo "### 🛠 Fixes"
+            echo "### Fixes"
             log 'fix'
             echo
-            echo "### ⚡ Improvements"
+            echo "### Improvements"
             log 'perf|style|refactor'
             echo
-            echo "### 🧹 Housekeeping"
+            echo "### Housekeeping"
             log 'ci|docs|chore|build'
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
