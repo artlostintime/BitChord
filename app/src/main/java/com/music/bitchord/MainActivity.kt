@@ -624,7 +624,10 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             showSpotify = false
         }
         BackHandler(enabled = showExtensions) {
+            // Store is its own page layered over Settings; closing it returns
+            // to Settings with the underlying tab (selectedTab) untouched.
             showExtensions = false
+            showSettings = true
         }
         BackHandler(enabled = showAccountScrobbling && !showDiscord) {
             showAccountScrobbling = false
@@ -681,6 +684,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             } else if (key == "extensions") {
                 ExtensionsScreen(
                     contentPadding = listPadding,
+                    hazeState = hazeState,
                 )
             } else if (key == "account_scrobbling") {
                 AccountAndScrobblingScreen(
@@ -710,7 +714,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onSignOut = { viewModel.signOut() },
                     onAccountScrobbling = { showAccountScrobbling = true },
                     onLyricsSources = { showLyricsSources = true },
-                    onExtensions = { showExtensions = true },
+                    onExtensions = { showSettings = false; showExtensions = true },
                     contentPadding = listPadding,
                 )
             } else if (page != null && page.browseId.startsWith("local:")) {
@@ -978,6 +982,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                 showDiscord -> "Discord"
                 showSpotify -> "Spotify"
                 showAccountScrobbling -> "Account & scrobbling"
+                showExtensions -> "Extension store"
                 showSettings -> "Settings"
                 detail != null -> detail.title
                 else -> tabs[selectedTab].label
@@ -987,7 +992,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             // Search has no large in-list header to hand the title back to —
             // the field takes that space — so its bar title is always up.
             scrolled = when {
-                showSettings || showAccountScrobbling || showDiscord || showSpotify -> true
+                showSettings || showAccountScrobbling || showDiscord || showSpotify || showExtensions -> true
                 detail != null -> detailScrolled
                 else -> scrolled || selectedTab == TAB_SEARCH
             },
@@ -997,6 +1002,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                 showDiscord -> ({ showDiscord = false })
                 showSpotify -> ({ showSpotify = false })
                 showAccountScrobbling -> ({ showAccountScrobbling = false })
+                showExtensions -> ({ showExtensions = false; showSettings = true })
                 showSettings -> ({ showSettings = false })
                 detail != null -> ({ viewModel.closeDetail(); Unit })
                 else -> null
@@ -1018,7 +1024,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                         }
                     }
                 }
-                if (!showSettings && !showAccountScrobbling) {
+                if (!showSettings && !showAccountScrobbling && !showExtensions) {
                     TopBarAccountButton(
                         account = account,
                         onClick = { showSettings = true },
