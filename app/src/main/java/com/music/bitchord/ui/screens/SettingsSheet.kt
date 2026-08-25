@@ -50,6 +50,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Waves
@@ -99,6 +100,7 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.data.model.Account
+import com.music.bitchord.data.AppUpdateChecker
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceKind
@@ -184,7 +186,9 @@ fun SettingsScreen(
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
+    var checkingUpdate by remember { mutableStateOf(false) }
     val scrobbleScope = rememberCoroutineScope()
+    val updateScope = rememberCoroutineScope()
 
     // Coming back from the system Atmos panel is the one moment the answer is
     // most likely to have changed, and on devices whose Atmos switch isn't
@@ -674,6 +678,29 @@ fun SettingsScreen(
                     )
                 },
                 onClick = { AppSettings.setHideVolumeBar(!hideVolumeBar) },
+            )
+        }
+
+        SettingsGroup(header = "About") {
+            SettingsRow(
+                icon = Icons.Rounded.SystemUpdate,
+                title = "Check for updates",
+                subtitle = if (checkingUpdate) "Checking…" else "Look for a newer build on GitHub",
+                enabled = !checkingUpdate,
+                onClick = {
+                    checkingUpdate = true
+                    updateScope.launch {
+                        // Re-runs the existing once-per-launch check on demand.
+                        // If a newer release is found, MainActivity's observer of
+                        // AppUpdateChecker.available surfaces UpdateAvailableDialog;
+                        // otherwise we tell the user they're current.
+                        AppUpdateChecker.check()
+                        if (AppUpdateChecker.available.value == null) {
+                            Toast.makeText(context, "You're on the latest version", Toast.LENGTH_SHORT).show()
+                        }
+                        checkingUpdate = false
+                    }
+                },
             )
         }
 
