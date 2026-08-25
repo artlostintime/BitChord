@@ -1899,6 +1899,14 @@ private fun LyricsPanel(
         return
     }
 
+    // Karaoke palette: the line being sung is the brand primary and bold;
+    // every other line is the surface's muted variant at 40%, brightening
+    // to near-full while the user is browsing the list by hand.
+    val primary = MaterialTheme.colorScheme.primary
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+        alpha = if (browsing) 0.85f else 0.4f,
+    )
+
     LazyColumn(
         state = listState,
         modifier = modifier
@@ -1914,13 +1922,6 @@ private fun LyricsPanel(
         ),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // Karaoke palette: the line being sung is the brand primary and bold;
-        // every other line is the surface's muted variant at 40%, brightening
-        // to near-full while the user is browsing the list by hand.
-        val primary = MaterialTheme.colorScheme.primary
-        val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = if (browsing) 0.85f else 0.4f,
-        )
         itemsIndexed(lines) { index, line ->
             val distance = if (activeLine < 0) 0 else abs(index - activeLine)
             val isActive = index == activeLine
