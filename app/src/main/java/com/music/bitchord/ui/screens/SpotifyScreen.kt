@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -24,10 +25,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.derivedStateOf
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,19 +96,40 @@ fun SpotifyScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var importedSongs by remember { mutableStateOf<List<Song>?>(null) }
 
+    var resolveProgress by remember { mutableStateOf(0) }
+    var resolveTotal by remember { mutableStateOf(0) }
+
     val scope = rememberCoroutineScope()
+
+    // ponytail: scroll-linked collapse of the large title, mirroring Home's
+    // firstVisibleItem hand-off to the top bar.
+    val listState = rememberLazyListState()
+    val titleCollapsed by remember(listState) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 ||
+                listState.firstVisibleItemScrollOffset > 24
+        }
+    }
 
     fun openPlaylist(playlist: SpotifyClient.SpotifyPlaylist) {
         selectedPlaylist = playlist
         playlistSongs = null
         playlistError = null
         playlistLoading = true
+        resolveProgress = 0
+        resolveTotal = 0
         scope.launch {
             runCatching {
                 val tracks = SpotifyClient.playlistTracks(spDc, playlist.id)
+                resolveTotal = tracks.size
                 // ponytail: sequential resolve through the shared LRU cache;
                 // parallel would hammer Innertube. No ISRC via sp_dc API — fuzzy only.
-                tracks.mapNotNull { SpotifyMapper.resolve(it) }
+                val resolved = mutableListOf<Song>()
+                tracks.forEachIndexed { i, track ->
+                    SpotifyMapper.resolve(track)?.let { resolved += it }
+                    resolveProgress = i + 1
+                }
+                resolved
             }.onSuccess { playlistSongs = it }
                 .onFailure { playlistError = it.message ?: "Failed to load playlist" }
             playlistLoading = false
@@ -173,6 +197,7 @@ fun SpotifyScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
     ) {
@@ -183,8 +208,15 @@ fun SpotifyScreen(
             ) {
                 Text(
                     "Your Spotify Library",
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 8.dp)
+                        .graphicsLayer {
+                            alpha = if (titleCollapsed) 0f else 1f
+                            translationY = if (titleCollapsed) -24f else 0f
+                        },
                 )
                 TextButton(onClick = onSignOut) { Text("Sign out") }
             }
@@ -260,7 +292,12 @@ fun SpotifyScreen(
             }
             when {
                 playlistLoading -> item {
-                    SongRowSkeleton()
+                    Text(
+                        if (resolveTotal == 0) "Resolving playlist…"
+                        else "Resolving $resolveProgress/$resolveTotal…",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(PAGE_GUTTER),
+                    )
                 }
                 playlistError != null -> item {
                     MessageState(message = playlistError!!)

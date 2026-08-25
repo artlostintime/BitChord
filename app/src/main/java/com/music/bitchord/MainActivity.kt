@@ -799,6 +799,24 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                         signedIn = signedIn,
                         onSignIn = { showLogin = true },
                         onItemClick = { item ->
+                            // A Spotify home-shelf playlist carries its id in
+                            // browseId; load the FULL queue and play it rather
+                            // than seeding a first-track radio.
+                            if (useSpotifyHome && item.browseId?.startsWith("spotify:playlist:") == true) {
+                                val id = item.browseId.removePrefix("spotify:playlist:")
+                                scope.launch {
+                                    // ponytail: home tap has no inline list UI
+                                    // to host the X/Y counter; a Toast stands in.
+                                    Toast.makeText(
+                                        context,
+                                        "Resolving Spotify playlist…",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                    val songs = viewModel.loadSpotifyPlaylistSongs(id)
+                                    if (songs.isNotEmpty()) play(songs, 0)
+                                }
+                                return@onItemClick
+                            }
                             when {
                                 item.videoId != null -> playRadio(
                                     Song(

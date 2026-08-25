@@ -841,22 +841,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             title = "Your Playlists",
             subtitle = "${playlists.size} playlists",
             items = playlists.mapNotNull { pl ->
-                // ponytail: seed radio from the playlist's first track so the
-                // click stays on the existing videoId→playRadio path with a
-                // single resolve; fetch+resolve every track only if a full
-                // queue is wanted later.
-                val seed = SpotifyClient.playlistFirstTrack(spDc, pl.id)
-                    ?.let { SpotifyMapper.resolve(it) }
+                // ponytail: home tap loads the FULL queue (see
+                // MainViewModel.loadSpotifyPlaylistSongs) — the playlist id rides
+                // in browseId so MainActivity can route the tap to it; the
+                // first-track seed is no longer needed here.
                 ShelfItem(
                     title = pl.name,
                     subtitle = "${pl.trackCount} tracks",
                     thumbnailUrl = pl.imageUrl,
-                    videoId = seed?.videoId,
-                    browseId = null,
+                    videoId = null,
+                    browseId = "spotify:playlist:${pl.id}",
                 )
             },
         )
         return listOf(likedShelf, playlistShelf).filter { it.items.isNotEmpty() }
+    }
+
+    /**
+     * Full Spotify playlist queue for a home-shelf tap: every track fetched and
+     * resolved to a YT Music [Song], so playback is the whole list rather than a
+     * first-track radio. [spotifySpDc] may have cleared by the time a tap lands,
+     * in which case there's nothing to resolve.
+     */
+    suspend fun loadSpotifyPlaylistSongs(playlistId: String): List<Song> {
+        val spDc = spotifySpDc ?: return emptyList()
+        return runCatching {
+            val tracks = SpotifyClient.playlistTracks(spDc, playlistId)
+            // ponytail: resolve-all before playback (sequential through the
+            // shared LRU cache; parallel would hammer Innertube).
+            tracks.mapNotNull { SpotifyMapper.resolve(it) }
+        }.getOrDefault(emptyList())
     }
 
     fun loadLibrary() {
