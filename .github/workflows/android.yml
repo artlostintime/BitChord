@@ -22,7 +22,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: BitChord-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/**/*.apk
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -37,4 +37,4 @@ jobs:
       - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
       - uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/**/*.apk
