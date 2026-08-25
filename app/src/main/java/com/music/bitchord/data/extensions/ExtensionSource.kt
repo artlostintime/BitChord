@@ -84,7 +84,7 @@ class ExtensionSource(
         val dir = SflxInstaller.installDir(context, extId)
         val jsFile = File(dir, "index.js")
         if (!jsFile.exists()) return Result.failure(IllegalStateException("index.js missing for $extId"))
-        ExtensionJs.load(extId, jsFile.readText(), manifest(), storagePrefs())
+        return runCatching { ExtensionJs.load(extId, jsFile.readText(), manifest(), storagePrefs()) }
     }
 
     override suspend fun search(query: String, limit: Int, waitForAll: Boolean): List<Song> =
@@ -314,7 +314,7 @@ internal object ExtensionJs {
         }
     }
 
-    private fun bindFetch(qjs: QuickJs, extId: String) {
+    private suspend fun bindFetch(qjs: QuickJs, extId: String) {
         qjs.define("__ext_net") {
             asyncFunction("fetch", object : AsyncFunctionBinding<String> {
                 override suspend fun invoke(args: Array<Any?>): String {
