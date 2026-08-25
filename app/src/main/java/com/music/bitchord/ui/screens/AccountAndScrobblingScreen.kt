@@ -38,6 +38,8 @@ fun AccountAndScrobblingScreen(
     onOpenListenBrainzLogin: () -> Unit,
     onOpenLastfmLogin: () -> Unit,
     onOpenDiscord: () -> Unit,
+    onOpenSpotify: () -> Unit,
+    spotifySignedIn: Boolean,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -91,6 +93,18 @@ fun AccountAndScrobblingScreen(
                     else -> "Sharing your listens"
                 },
                 onClick = onOpenDiscord,
+            )
+        }
+
+        SettingsGroup(
+            header = "Spotify",
+            footer = "Import your liked songs as a YouTube Music queue.",
+        ) {
+            SettingsRow(
+                icon = ImageVector.vectorResource(R.drawable.ic_discord), // TODO: add spotify icon
+                title = "Spotify",
+                subtitle = if (spotifySignedIn) "Connected — liked songs ready" else "Tap to connect",
+                onClick = onOpenSpotify,
             )
         }
 

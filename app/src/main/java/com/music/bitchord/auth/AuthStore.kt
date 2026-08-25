@@ -48,11 +48,26 @@ class AuthStore(context: Context) {
         get() = prefs.getString(KEY_DISCORD_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_DISCORD_TOKEN, value).apply()
 
+    /** Spotify web session cookie (sp_dc) — same trust level as [cookie]. */
+    var spotifySpDc: String?
+        get() = prefs.getString(KEY_SPOTIFY_SP_DC, null)
+        set(value) = prefs.edit().putString(KEY_SPOTIFY_SP_DC, value).apply()
+
+    val isSpotifySignedIn: Boolean
+        get() = !spotifySpDc.isNullOrBlank()
+
     /** Signs out of YouTube Music only — the Discord login is a separate account. */
     fun signOut() = prefs.edit().remove(KEY_COOKIE).apply()
+
+    /** Signs out of Spotify only. */
+    fun spotifySignOut() {
+        prefs.edit().remove(KEY_SPOTIFY_SP_DC).apply()
+        com.music.bitchord.data.spotify.SpotifyClient.reset()
+    }
 
     private companion object {
         const val KEY_COOKIE = "cookie"
         const val KEY_DISCORD_TOKEN = "discord_token"
+        const val KEY_SPOTIFY_SP_DC = "spotify_sp_dc"
     }
 }

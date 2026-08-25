@@ -55,6 +55,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val authStore = AuthStore(app)
 
+    /** Spotify session cookie, read by the Spotify screen. */
+    val spotifySpDc: String? get() = authStore.spotifySpDc
+
+    val isSpotifySignedIn: Boolean get() = authStore.isSpotifySignedIn
+
+    fun saveSpotifySpDc(spDc: String) {
+        authStore.spotifySpDc = spDc
+    }
+
+    fun spotifySignOut() {
+        authStore.spotifySignOut()
+    }
+
     private val _signedIn = MutableStateFlow(authStore.isSignedIn)
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
