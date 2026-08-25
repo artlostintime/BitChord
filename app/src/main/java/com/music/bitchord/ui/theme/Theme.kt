@@ -16,7 +16,9 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.R
+import com.music.bitchord.data.settings.AppSettings
 
 // Apple Music's signature red, used sparingly as the single accent.
 val AccentRed = Color(0xFFFA2D48)
@@ -43,6 +45,17 @@ private val LightColors = lightColorScheme(
     surfaceVariant = Color(0xFFF2F2F7),
     onSurfaceVariant = Color(0xFF6E6E73),
     outline = Color(0xFFE5E5EA),
+)
+
+/**
+ * Dark scheme with every surface pushed to true black for OLED/AMOLED. Derived
+ * from [DarkColors] so the Apple-red accent and all text colours survive
+ * untouched — only background/surface/surfaceVariant change.
+ */
+private val PureBlackColors = DarkColors.copy(
+    background = Color.Black,
+    surface = Color.Black,
+    surfaceVariant = Color.Black,
 )
 
 /**
@@ -95,8 +108,14 @@ fun BitChordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val pureBlack by AppSettings.pureBlack.collectAsStateWithLifecycle()
+    val colorScheme = when {
+        darkTheme && pureBlack -> PureBlackColors
+        darkTheme -> DarkColors
+        else -> LightColors
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme,
         typography = BitChordTypography,
         content = content,
     )

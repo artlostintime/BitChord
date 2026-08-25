@@ -149,6 +149,7 @@ fun SettingsScreen(
     val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
+    val pureBlack by AppSettings.pureBlack.collectAsStateWithLifecycle()
     val uiMode by AppSettings.uiMode.collectAsStateWithLifecycle()
     val advanced = uiMode == UiMode.ADVANCED
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
@@ -428,6 +429,23 @@ fun SettingsScreen(
                 selectedIndex = ThemeMode.entries.indexOf(theme),
                 onSelect = { AppSettings.setThemeMode(ThemeMode.entries[it]) },
                 modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Brightness4,
+                title = "Pure black (AMOLED)",
+                subtitle = "True-black backgrounds for OLED screens",
+                trailing = {
+                    Switch(
+                        checked = pureBlack,
+                        onCheckedChange = AppSettings::setPureBlack,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setPureBlack(!pureBlack) },
             )
             RowDivider()
             SettingsRow(

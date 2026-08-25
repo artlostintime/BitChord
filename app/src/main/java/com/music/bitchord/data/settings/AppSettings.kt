@@ -165,6 +165,12 @@ object AppSettings {
     val playbackSpeed = MutableStateFlow(1.0f)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
 
+    /**
+     * True-black backgrounds in dark mode for OLED/AMOLED screens. Only takes
+     * effect while dark mode is active — light mode keeps its white surfaces.
+     */
+    val pureBlack = MutableStateFlow(false)
+
     /** Keep playing similar music once the queue runs out. */
     val autoplay = MutableStateFlow(true)
 
@@ -386,6 +392,7 @@ object AppSettings {
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
+        pureBlack.value = prefs.getBoolean(KEY_PURE_BLACK, false)
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
@@ -598,6 +605,11 @@ object AppSettings {
     fun setThemeMode(value: ThemeMode) {
         themeMode.value = value
         prefs.edit().putString(KEY_THEME, value.name).apply()
+    }
+
+    fun setPureBlack(value: Boolean) {
+        pureBlack.value = value
+        prefs.edit().putBoolean(KEY_PURE_BLACK, value).apply()
     }
 
     fun setReduceAnimation(value: Boolean) {
@@ -860,6 +872,7 @@ object AppSettings {
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
+    private const val KEY_PURE_BLACK = "pure_black"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
