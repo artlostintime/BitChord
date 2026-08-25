@@ -39,9 +39,11 @@ import com.music.bitchord.data.spotify.SpotifyClient
 import com.music.bitchord.data.spotify.SpotifyMapper
 
 /**
- * Spotify recommendations: pulls the account's liked songs and maps each one to
- * a playable YouTube Music track via [SpotifyMapper] (Meld's fuzzy matcher).
- * Tapping a row starts playback of the mapped queue from that track.
+ * Spotify recommendations: on open (with a valid sp_dc) it auto-loads the
+ * account's liked songs AND every playlist, mirroring Google-sign-in behavior —
+ * no pasting URLs. Tapping a playlist drills into its tracks (resolved to
+ * YouTube Music via [SpotifyMapper] and playable like the liked-songs queue).
+ * Manual URL import is kept as a small secondary action at the bottom.
  */
 @Composable
 fun SpotifyScreen(
@@ -60,7 +62,7 @@ fun SpotifyScreen(
         ) {
             Text("Connect your Spotify account", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Your liked songs become a playable queue here, matched to YouTube Music.",
+                "Your liked songs and playlists become a playable queue here, matched to YouTube Music.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(onClick = onOpenLogin) { Text("Sign in with Spotify") }
@@ -68,9 +70,18 @@ fun SpotifyScreen(
         return
     }
 
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var likedLoading by remember { mutableStateOf(true) }
+    var likedError by remember { mutableStateOf<String?>(null) }
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
+
+    var playlistsLoading by remember { mutableStateOf(true) }
+    var playlistsError by remember { mutableStateOf<String?>(null) }
+    var playlists by remember { mutableStateOf<List<SpotifyClient.SpotifyPlaylist>>(emptyList()) }
+
+    var selectedPlaylist by remember { mutableStateOf<SpotifyClient.SpotifyPlaylist?>(null) }
+    var playlistLoading by remember { mutableStateOf(false) }
+    var playlistError by remember { mutableStateOf<String?>(null) }
+    var playlistSongs by remember { mutableStateOf<List<Song>?>(null) }
 
     var playlistUrl by remember { mutableStateOf("") }
     var importing by remember { mutableStateOf(false) }
@@ -80,6 +91,24 @@ fun SpotifyScreen(
     var importedSongs by remember { mutableStateOf<List<Song>?>(null) }
 
     val scope = rememberCoroutineScope()
+
+    fun openPlaylist(playlist: SpotifyClient.SpotifyPlaylist) {
+        selectedPlaylist = playlist
+        playlistSongs = null
+        playlistError = null
+        playlistLoading = true
+        scope.launch {
+            runCatching {
+                val tracks = SpotifyClient.playlistTracks(spDc, playlist.id)
+                // ponytail: sequential resolve through the shared LRU cache;
+                // parallel would hammer Innertube. No ISRC via sp_dc API — fuzzy only.
+                tracks.mapNotNull { SpotifyMapper.resolve(it) }
+            }.onSuccess { playlistSongs = it }
+                .onFailure { playlistError = it.message ?: "Failed to load playlist" }
+            playlistLoading = false
+        }
+    }
+
     fun importPlaylist() {
         val id = parsePlaylistId(playlistUrl) ?: run {
             importError = "Paste a Spotify playlist URL or ID"
@@ -109,6 +138,12 @@ fun SpotifyScreen(
     }
 
     LaunchedEffect(spDc) {
+        // Reset drill-down state on (re)sign-in.
+        selectedPlaylist = null
+        playlistSongs = null
+        playlistError = null
+
+        // Liked songs
         runCatching {
             val tracks = SpotifyClient.likedSongs(spDc)
             // Resolve sequentially through the shared LRU cache — parallel
@@ -116,136 +151,304 @@ fun SpotifyScreen(
             tracks.mapNotNull { SpotifyMapper.resolve(it) }
         }.onSuccess {
             songs = it
-            error = null
+            likedError = null
         }.onFailure {
-            error = it.message ?: "Failed to load"
+            likedError = it.message ?: "Failed to load"
         }
-        loading = false
+        likedLoading = false
+
+        // User playlists
+        runCatching { SpotifyClient.userPlaylists(spDc) }
+            .onSuccess {
+                playlists = it
+                playlistsError = null
+            }
+            .onFailure {
+                playlistsError = it.message ?: "Failed to load playlists"
+            }
+        playlistsLoading = false
     }
 
-    when {
-        loading -> Column(
-            modifier = modifier.fillMaxSize().padding(contentPadding),
-            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            CircularProgressIndicator()
-            Text("Matching your liked songs…", style = MaterialTheme.typography.bodySmall)
-        }
-        error != null -> Column(
-            modifier = modifier.fillMaxSize().padding(contentPadding).padding(32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(error!!, color = MaterialTheme.colorScheme.error)
-            Button(onClick = onOpenLogin) { Text("Sign in again") }
-        }
-        else -> LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = contentPadding,
-        ) {
-            item {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("Import a playlist", style = MaterialTheme.typography.titleMedium)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedTextField(
-                            value = playlistUrl,
-                            onValueChange = { playlistUrl = it },
-                            placeholder = { Text("Spotify playlist URL or ID") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            enabled = !importing,
-                        )
-                        Button(onClick = { importPlaylist() }, enabled = !importing) {
-                            Text("Import")
-                        }
-                    }
-                    when {
-                        importing -> Text(
-                            "Resolving ${importProgress}/${importTotal}…",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        importError != null -> Text(
-                            importError!!,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        importedSongs != null -> {
-                            val resolved = importedSongs!!
-                            val failed = importTotal - resolved.size
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    "Resolved ${resolved.size} track(s)" +
-                                        if (failed > 0) " · $failed not found" else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (resolved.isNotEmpty()) {
-                                    Button(onClick = { onPlay(resolved, 0) }) { Text("Play") }
-                                }
-                            }
-                        }
-                    }
-                }
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Your Spotify Library",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                )
+                TextButton(onClick = onSignOut) { Text("Sign out") }
             }
-            item {
+        }
+
+        // ---- Your Playlists ----
+        item {
+            Text(
+                "Your Playlists",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp),
+            )
+        }
+        when {
+            playlistsLoading -> item {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(
-                        "Liked from Spotify",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.weight(1f).padding(vertical = 12.dp),
-                    )
-                    TextButton(onClick = onSignOut) { Text("Sign out") }
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text("Loading your playlists…", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            items(songs.size, key = { songs[it].videoId }) { index ->
-                val song = songs[index]
+            playlistsError != null -> item {
+                Text(
+                    playlistsError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(20.dp),
+                )
+            }
+            playlists.isEmpty() -> item {
+                Text(
+                    "No playlists found on this account.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(20.dp),
+                )
+            }
+            else -> items(playlists.size, key = { playlists[it].id }) { index ->
+                val playlist = playlists[index]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onPlay(songs, index) }
+                        .clickable { openPlaylist(playlist) }
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AsyncImage(
-                        model = song.artworkAt(160),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
-                    )
+                    if (playlist.imageUrl != null) {
+                        AsyncImage(
+                            model = playlist.imageUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                        )
+                    }
                     Column(Modifier.weight(1f)) {
-                        Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            song.artist,
+                            "${playlist.trackCount} track(s)",
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Text(song.durationText ?: "", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            if (songs.isEmpty()) {
-                item {
-                    Text(
-                        "No liked songs found on this account.",
-                        modifier = Modifier.padding(20.dp),
-                    )
                 }
             }
         }
+
+        // ---- Selected playlist tracks (drill-down) ----
+        if (selectedPlaylist != null) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Tracks · ${selectedPlaylist!!.name}",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    )
+                    TextButton(onClick = {
+                        selectedPlaylist = null
+                        playlistSongs = null
+                        playlistError = null
+                    }) { Text("Back") }
+                }
+            }
+            when {
+                playlistLoading -> item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Text("Resolving tracks…", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                playlistError != null -> item {
+                    Text(
+                        playlistError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(20.dp),
+                    )
+                }
+                playlistSongs == null || playlistSongs.isEmpty() -> item {
+                    Text(
+                        "No tracks resolved for this playlist.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(20.dp),
+                    )
+                }
+                else -> {
+                    val resolved = playlistSongs!!
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "Resolved ${resolved.size} track(s)",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (resolved.isNotEmpty()) {
+                                Button(onClick = { onPlay(resolved, 0) }) { Text("Play") }
+                            }
+                        }
+                    }
+                    items(resolved.size, key = { resolved[it].videoId }) { index ->
+                        SpotifyTrackRow(resolved[index], onClick = { onPlay(resolved, index) })
+                    }
+                }
+            }
+        }
+
+        // ---- Liked from Spotify ----
+        item {
+            Text(
+                "Liked from Spotify",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
+            )
+        }
+        when {
+            likedLoading -> item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text("Matching your liked songs…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            likedError != null -> item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(likedError!!, color = MaterialTheme.colorScheme.error)
+                    Button(onClick = onOpenLogin) { Text("Sign in again") }
+                }
+            }
+            songs.isEmpty() -> item {
+                Text(
+                    "No liked songs found on this account.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(20.dp),
+                )
+            }
+            else -> items(songs.size, key = { songs[it].videoId }) { index ->
+                SpotifyTrackRow(songs[index], onClick = { onPlay(songs, index) })
+            }
+        }
+
+        // ---- Manual URL import (demoted secondary action) ----
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Or import a playlist by URL", style = MaterialTheme.typography.bodySmall)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = playlistUrl,
+                        onValueChange = { playlistUrl = it },
+                        placeholder = { Text("Spotify playlist URL or ID") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = !importing,
+                    )
+                    Button(onClick = { importPlaylist() }, enabled = !importing) {
+                        Text("Import")
+                    }
+                }
+                when {
+                    importing -> Text(
+                        "Resolving ${importProgress}/${importTotal}…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    importError != null -> Text(
+                        importError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    importedSongs != null -> {
+                        val resolved = importedSongs!!
+                        val failed = importTotal - resolved.size
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "Resolved ${resolved.size} track(s)" +
+                                    if (failed > 0) " · $failed not found" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (resolved.isNotEmpty()) {
+                                Button(onClick = { onPlay(resolved, 0) }) { Text("Play") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Shared row for a resolved [Song] used by both the liked-songs list and the
+ * drilled-in playlist track list. Reuses the existing artwork + typography style.
+ */
+@Composable
+private fun SpotifyTrackRow(song: Song, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AsyncImage(
+            model = song.artworkAt(160),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                song.artist,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(song.durationText ?: "", style = MaterialTheme.typography.bodySmall)
     }
 }
 

@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -32,6 +33,13 @@ object SpotifyClient {
         val durationMs: Long,
     )
 
+    data class SpotifyPlaylist(
+        val id: String,
+        val name: String,
+        val trackCount: Int,
+        val imageUrl: String?,
+    )
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private const val GQL_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
@@ -47,6 +55,7 @@ object SpotifyClient {
         "searchDesktop" to "4801118d4a100f756e833d33984436a3899cff359c532f8fd3aaf174b60b3b49",
         "fetchPlaylist" to "346811f856fb0b7e4f6c59f8ebea78dd081c6e2fb01b77c954b26259d5fc6763",
         "fetchLibraryTracks" to "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
+        "libraryV3" to "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455",
     )
 
     @Volatile
@@ -222,6 +231,55 @@ object SpotifyClient {
                 artist = artists,
                 albumName = track["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content,
                 durationMs = track["duration"]?.jsonObject?.get("totalMilliseconds")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+            )
+        }
+    }
+
+    /**
+     * Signed-in user's playlists via the same sp_dc GraphQL persisted-query
+     * mechanism as [likedSongs]. `libraryV3` with the `Playlists` filter is the
+     * current Web Player operation that returns the account's playlists.
+     */
+    suspend fun userPlaylists(spDc: String): List<SpotifyPlaylist> {
+        val all = mutableListOf<SpotifyPlaylist>()
+        var offset = 0
+        while (true) {
+            val data = gql(
+                spDc, "libraryV3",
+                buildJsonObject {
+                    put("filters", buildJsonArray { add("Playlists") })
+                    put("order", "DEFAULT")
+                    put("textFilter", "")
+                    put("offset", offset)
+                    put("limit", PAGE_LIMIT)
+                },
+            )
+            val page = parsePlaylists(data)
+            all += page
+            if (page.size < PAGE_LIMIT) break
+            offset += PAGE_LIMIT
+        }
+        return all
+    }
+
+    private fun parsePlaylists(data: JsonObject): List<SpotifyPlaylist> {
+        // ponytail: libraryV3 response shape derived from the public Web Player
+        // schema (itemV2.data, tracks.totalCount, images[].url). Field paths need
+        // runtime verification against a real account — adjust if Spotify changed it.
+        val items = data.jsonObject["libraryV3"]?.jsonObject?.get("items")?.jsonArray
+            ?: return emptyList()
+        return items.mapNotNull { item ->
+            val pl = item.jsonObject["itemV2"]?.jsonObject?.get("data")?.jsonObject
+                ?: return@mapNotNull null
+            if (pl["__typename"]?.jsonPrimitive?.content != "Playlist") return@mapNotNull null
+            val uri = pl["uri"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            SpotifyPlaylist(
+                id = uri.removePrefix("spotify:playlist:"),
+                name = pl["name"]?.jsonPrimitive?.content.orEmpty(),
+                trackCount = pl["tracks"]?.jsonObject?.get("totalCount")?.jsonPrimitive?.content
+                    ?.toIntOrNull() ?: 0,
+                imageUrl = pl["images"]?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("url")?.jsonPrimitive?.content,
             )
         }
     }
