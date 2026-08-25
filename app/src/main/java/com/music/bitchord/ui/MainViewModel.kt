@@ -18,6 +18,7 @@ import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.DetailPage
 import com.music.bitchord.data.model.HomeShelf
+import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.LibraryPage
 import com.music.bitchord.data.model.LibraryState
 import com.music.bitchord.data.model.LikeStatus
@@ -29,6 +30,8 @@ import com.music.bitchord.data.model.SongMenu
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.UserPlaylist
 import com.music.bitchord.data.settings.SearchHistory
+import com.music.bitchord.data.spotify.SpotifyClient
+import com.music.bitchord.data.spotify.SpotifyMapper
 import android.util.LruCache
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -62,6 +65,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveSpotifySpDc(spDc: String) {
         authStore.spotifySpDc = spDc
+        loadSpotifyHome()
     }
 
     fun spotifySignOut() {
@@ -73,6 +77,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
     val home: StateFlow<UiState<List<HomeShelf>>> = _home.asStateFlow()
+
+    /** Spotify-powered Listen Now feed; used by the home tab when signed in to Spotify. */
+    private val _spotifyHome = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
+    val spotifyHome: StateFlow<UiState<List<HomeShelf>>> = _spotifyHome.asStateFlow()
+
+    private val _spotifyHomeRefreshing = MutableStateFlow(false)
+    val spotifyHomeRefreshing: StateFlow<Boolean> = _spotifyHomeRefreshing.asStateFlow()
+
+    /** Max liked songs resolved into the Spotify home shelf (see buildSpotifyHome). */
+    private val SPOTIFY_HOME_LIKED_MAX = 100
 
     /**
      * Token for the next page of Home shelves; null once there's nothing
@@ -649,6 +663,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         startSuggestPipeline()
         loadHome()
         loadExplore()
+        if (spotifySpDc != null) loadSpotifyHome()
         if (_signedIn.value) {
             loadLibrary()
             loadAccount()
@@ -777,6 +792,71 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             _homeLoadingMore.value = false
         }
+    }
+
+    /**
+     * Listen Now, powered by Spotify: liked songs (resolved to YT Music tracks)
+     * and the user's playlists, mapped into the same [HomeShelf] structures
+     * [HomeScreen] already renders. Falls back to the YT home feed when Spotify
+     * isn't signed in or the load fails — see the TAB_HOME branch in MainActivity.
+     */
+    fun loadSpotifyHome() {
+        val spDc = spotifySpDc ?: return
+        _spotifyHomeRefreshing.value = true
+        viewModelScope.launch {
+            runCatching { buildSpotifyHome(spDc) }
+                .onSuccess { shelves ->
+                    _spotifyHome.value = if (shelves.isEmpty()) {
+                        UiState.Error("Nothing from Spotify yet")
+                    } else {
+                        UiState.Success(shelves)
+                    }
+                }
+                .onFailure { _spotifyHome.value = UiState.Error(it.friendly()) }
+            _spotifyHomeRefreshing.value = false
+        }
+    }
+
+    private suspend fun buildSpotifyHome(spDc: String): List<HomeShelf> {
+        // ponytail: resolving every liked song is one YT Music search each; the
+        // cap keeps the home load bounded. Raise/remove SPOTIFY_HOME_LIKED_MAX to
+        // show the whole library.
+        val liked = SpotifyClient.likedSongs(spDc).take(SPOTIFY_HOME_LIKED_MAX)
+        val likedShelf = HomeShelf(
+            title = "Liked on Spotify",
+            subtitle = "${liked.size} songs",
+            items = liked.mapNotNull { track ->
+                val song = SpotifyMapper.resolve(track) ?: return@mapNotNull null
+                ShelfItem(
+                    title = song.title,
+                    subtitle = song.artist,
+                    thumbnailUrl = song.thumbnailUrl,
+                    videoId = song.videoId,
+                    browseId = null,
+                )
+            },
+        )
+        val playlists = SpotifyClient.userPlaylists(spDc)
+        val playlistShelf = HomeShelf(
+            title = "Your Playlists",
+            subtitle = "${playlists.size} playlists",
+            items = playlists.mapNotNull { pl ->
+                // ponytail: seed radio from the playlist's first track so the
+                // click stays on the existing videoId→playRadio path with a
+                // single resolve; fetch+resolve every track only if a full
+                // queue is wanted later.
+                val seed = SpotifyClient.playlistFirstTrack(spDc, pl.id)
+                    ?.let { SpotifyMapper.resolve(it) }
+                ShelfItem(
+                    title = pl.name,
+                    subtitle = "${pl.trackCount} tracks",
+                    thumbnailUrl = pl.imageUrl,
+                    videoId = seed?.videoId,
+                    browseId = null,
+                )
+            },
+        )
+        return listOf(likedShelf, playlistShelf).filter { it.items.isNotEmpty() }
     }
 
     fun loadLibrary() {

@@ -199,6 +199,23 @@ object SpotifyClient {
         return all
     }
 
+    /**
+     * First track of a playlist, for seeding a radio without fetching the whole
+     * list. Reuses [gql]/[parsePlaylistTracks] with a page size of one.
+     */
+    suspend fun playlistFirstTrack(spDc: String, playlistId: String): SpotifyTrack? {
+        val data = gql(
+            spDc, "fetchPlaylist",
+            buildJsonObject {
+                put("uri", "spotify:playlist:$playlistId")
+                put("offset", 0)
+                put("limit", 1)
+                put("enableWatchFeedEntrypoint", false)
+            },
+        )
+        return parsePlaylistTracks(data).firstOrNull()
+    }
+
     suspend fun likedSongs(spDc: String): List<SpotifyTrack> {
         val all = mutableListOf<SpotifyTrack>()
         var offset = 0

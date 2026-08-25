@@ -226,6 +226,8 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
     SystemBarIcons(dark = !darkTheme && !showNowPlaying)
 
     val homeState by viewModel.home.collectAsStateWithLifecycle()
+    val spotifyHomeState by viewModel.spotifyHome.collectAsStateWithLifecycle()
+    val spotifyHomeRefreshing by viewModel.spotifyHomeRefreshing.collectAsStateWithLifecycle()
     val homeLoadingMore by viewModel.homeLoadingMore.collectAsStateWithLifecycle()
 
     // The top bar's icon is the quiet, always-there nudge; this is the
@@ -785,37 +787,46 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     contentPadding = listPadding,
                 )
             } else when (selectedTab) {
-                TAB_HOME -> HomeScreen(
-                    state = homeState,
-                    listState = homeListState,
-                    signedIn = signedIn,
-                    onSignIn = { showLogin = true },
-                    onItemClick = { item ->
-                        when {
-                            item.videoId != null -> playRadio(
-                                Song(
-                                    videoId = item.videoId,
+                TAB_HOME -> {
+                    val useSpotifyHome = viewModel.spotifySpDc != null &&
+                        spotifyHomeState is UiState.Success &&
+                        spotifyHomeState.data.isNotEmpty()
+                    val effectiveHomeState = if (useSpotifyHome) spotifyHomeState else homeState
+                    HomeScreen(
+                        state = effectiveHomeState,
+                        listState = homeListState,
+                        signedIn = signedIn,
+                        onSignIn = { showLogin = true },
+                        onItemClick = { item ->
+                            when {
+                                item.videoId != null -> playRadio(
+                                    Song(
+                                        videoId = item.videoId,
+                                        title = item.title,
+                                        artist = item.subtitle,
+                                        thumbnailUrl = item.thumbnailUrl,
+                                    ),
+                                )
+                                item.browseId != null -> viewModel.openDetail(
+                                    browseId = item.browseId,
                                     title = item.title,
-                                    artist = item.subtitle,
+                                    subtitle = item.subtitle,
                                     thumbnailUrl = item.thumbnailUrl,
-                                ),
-                            )
-                            item.browseId != null -> viewModel.openDetail(
-                                browseId = item.browseId,
-                                title = item.title,
-                                subtitle = item.subtitle,
-                                thumbnailUrl = item.thumbnailUrl,
-                            )
-                        }
-                    },
-                    onRetry = viewModel::loadHome,
-                    refreshing = MainViewModel.Feed.HOME in refreshing,
-                    onRefresh = { viewModel.refresh(MainViewModel.Feed.HOME) },
-                    pullState = homePull,
-                    contentPadding = listPadding,
-                    onLoadMore = viewModel::loadMoreHome,
-                    loadingMore = homeLoadingMore,
-                )
+                                )
+                            }
+                        },
+                        onRetry = if (useSpotifyHome) viewModel::loadSpotifyHome else viewModel::loadHome,
+                        refreshing = if (useSpotifyHome) spotifyHomeRefreshing else (MainViewModel.Feed.HOME in refreshing),
+                        onRefresh = {
+                            if (useSpotifyHome) viewModel.loadSpotifyHome()
+                            else viewModel.refresh(MainViewModel.Feed.HOME)
+                        },
+                        pullState = homePull,
+                        contentPadding = listPadding,
+                        onLoadMore = if (useSpotifyHome) null else viewModel::loadMoreHome,
+                        loadingMore = if (useSpotifyHome) false else homeLoadingMore,
+                    )
+                }
                 TAB_EXPLORE -> HomeScreen(
                     state = exploreState,
                     listState = exploreListState,
