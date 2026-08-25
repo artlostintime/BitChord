@@ -248,6 +248,7 @@ private fun SourceRow(
                 SourceKind.MODULE -> Icons.Rounded.Extension
                 SourceKind.YOUTUBE -> Icons.Rounded.PlayCircle
                 SourceKind.LOCAL -> Icons.Rounded.Storage
+                SourceKind.EXTENSION -> Icons.Rounded.Extension
             },
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onBackground,

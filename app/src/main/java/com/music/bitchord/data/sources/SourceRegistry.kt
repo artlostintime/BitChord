@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.TrackLog
+import com.music.bitchord.data.extensions.ExtensionSource
 import com.music.bitchord.data.settings.AppSettings
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -230,6 +231,7 @@ object SourceRegistry {
         SourceKind.MODULE -> ModuleSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
         SourceKind.LOCAL -> LocalFilesSource(config, appContext)
+        SourceKind.EXTENSION -> ExtensionSource(config, appContext)
     }
 
     /**

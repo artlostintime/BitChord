@@ -76,4 +76,23 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = true,
     ),
+
+    /**
+     * An installed SpotiFLAC (.sflx) extension: a sandboxed JavaScript plugin
+     * that registers `searchTracks`/`download` callbacks and is driven through
+     * [ExtensionSource]. Like [LOCAL] it needs no server config — its files
+     * live under `filesDir/extensions/<id>/` — and it can serve lossless.
+     *
+     * Not built-in: there is no extension until the user installs one, so it
+     * is absent from [SourceRegistry]'s seeded kinds and only appears once an
+     * [SflxInstaller] install adds its [SourceConfig].
+     */
+    EXTENSION(
+        label = "Extension",
+        detail = "An installed SpotiFLAC extension. Search and stream come from " +
+            "sandboxed JavaScript that registers search/download callbacks.",
+        labels = listOf("FLAC", "Lossless", "Plugin"),
+        needsServer = false,
+        canServeLossless = true,
+    ),
 }

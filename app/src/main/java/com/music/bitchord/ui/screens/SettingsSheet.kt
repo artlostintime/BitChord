@@ -293,6 +293,7 @@ fun SettingsScreen(
                         SourceKind.LOCAL -> Icons.Rounded.Storage
                         SourceKind.MODULE -> Icons.Rounded.Cloud
                         SourceKind.YOUTUBE -> Icons.Rounded.Language
+                        SourceKind.EXTENSION -> Icons.Rounded.Extension
                     },
                     title = cfg.displayName,
                     subtitle = cfg.kind.label,
