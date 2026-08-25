@@ -144,6 +144,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // ponytail: pick the highest-Hz mode at the device's native resolution
+        // so 90/120/144Hz panels aren't capped at 60. Activity.display is API
+        // 30+; below that fall back to WindowManager.defaultDisplay (deprecated).
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            @Suppress("NewApi")
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
+        val currentMode = display?.mode
+        val bestMode = display?.supportedModes
+            ?.filter { it.physicalWidth == currentMode?.physicalWidth && it.physicalHeight == currentMode?.physicalHeight }
+            ?.maxByOrNull { it.refreshRate }
+        if (bestMode != null) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = bestMode.modeId }
+        }
+
         setContent {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val darkTheme = when (theme) {

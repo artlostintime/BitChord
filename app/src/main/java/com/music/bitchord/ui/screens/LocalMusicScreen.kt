@@ -318,7 +318,7 @@ private fun ArtistsTab(
                 title = "${artists.size} artists",
             )
         }
-        items(artists) { (artist, artistSongs) ->
+        items(artists, key = { it.key }) { (artist, artistSongs) ->
             ArtistRow(
                 name = artist,
                 songCount = artistSongs.size,
@@ -410,7 +410,7 @@ private fun AlbumsTab(
                 MessageState(message = "None of these tracks say what album they're from.")
             }
         }
-        items(albums) { (album, albumSongs) ->
+        items(albums, key = { it.key }) { (album, albumSongs) ->
             AlbumRow(
                 name = album,
                 artist = albumSongs.firstOrNull()?.artist ?: "",

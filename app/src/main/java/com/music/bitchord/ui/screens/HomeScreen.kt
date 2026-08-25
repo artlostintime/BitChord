@@ -186,7 +186,7 @@ private fun HeroShelf(shelf: HomeShelf, onItemClick: (ShelfItem) -> Unit) {
             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            items(shelf.items) { item ->
+            items(shelf.items, key = { it.videoId ?: it.browseId ?: it.title }) { item ->
                 HeroCard(
                     item = item,
                     onClick = { onItemClick(item) },
@@ -267,7 +267,7 @@ internal fun Shelf(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             leadingCard?.let { card -> item(key = "leading") { card() } }
-            items(shelf.items) { item ->
+            items(shelf.items, key = { it.videoId ?: it.browseId ?: it.title }) { item ->
                 ShelfCard(
                     item = item,
                     onClick = { onItemClick(item) },
