@@ -7,6 +7,7 @@ import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.sources.SourceConfig
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
+import com.music.bitchord.data.extensions.ExtensionRegistryClient.RegistryEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -71,7 +72,7 @@ object SflxInstaller {
 
     private fun recordInstalled(context: Context, map: Map<String, Installed>) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_INSTALLED, json.encodeToString(map)).apply()
+            .putString(KEY_INSTALLED, json.encodeToString<Map<String, Installed>>(map)).apply()
     }
 
     /**

@@ -6,6 +6,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -247,7 +248,7 @@ object SpotifyClient {
             val data = gql(
                 spDc, "libraryV3",
                 buildJsonObject {
-                    put("filters", buildJsonArray { add("Playlists") })
+                    put("filters", buildJsonArray { add(JsonPrimitive("Playlists")) })
                     put("order", "DEFAULT")
                     put("textFilter", "")
                     put("offset", offset)
