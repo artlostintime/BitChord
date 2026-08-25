@@ -32,6 +32,12 @@ enum class AudioQuality(
      * different constant or it would wrongly require a bit-exact stream.
      */
     TIER_HIGH(256, "High", "AAC 256 kbps", "112 MB/hr"),
+    /**
+     * 32 kbps ceiling for [AudioTier.VERY_LOW]. Same reasoning as [TIER_HIGH]:
+     * a distinct constant from [LOW] so the source resolver's lossless gating
+     * and bit-exact checks stay untouched by the lowest tier.
+     */
+    TIER_VLOW(32, "Very Low", "~32 kbps", "14 MB/hr"),
 }
 
 /**
@@ -47,7 +53,9 @@ enum class AudioTier(val label: String, val detail: String) {
     HI_RES_LOSSLESS("Hi-Res Lossless", "up to 24-bit/192 kHz FLAC"),
     LOSSLESS("Lossless", "16-bit/44.1 kHz FLAC"),
     HIGH("High", "AAC 256 kbps"),
-    NORMAL("Normal", "~128 kbps Opus");
+    NORMAL("Normal", "~128 kbps Opus"),
+    LOW("Low", "~64 kbps Opus"),
+    VERY_LOW("Very Low", "~32 kbps");
 
     /** Whether this tier must only ever resolve to a bit-exact stream. */
     val isLossless: Boolean
@@ -59,6 +67,8 @@ enum class AudioTier(val label: String, val detail: String) {
         LOSSLESS -> AudioQuality.HIGH
         HIGH -> AudioQuality.TIER_HIGH
         NORMAL -> AudioQuality.MEDIUM
+        LOW -> AudioQuality.LOW
+        VERY_LOW -> AudioQuality.TIER_VLOW
     }
 }
 

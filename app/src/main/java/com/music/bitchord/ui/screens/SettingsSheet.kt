@@ -556,8 +556,9 @@ fun SettingsScreen(
             }
         }
 
-        val cacheLimitMb = (cacheLimitBytes / (1024 * 1024)).toInt()
-        SettingsGroup(header = "Storage") {
+        if (advanced) {
+            val cacheLimitMb = (cacheLimitBytes / (1024 * 1024)).toInt()
+            SettingsGroup(header = "Storage") {
             SliderRow(
                 icon = Icons.Rounded.Storage,
                 title = "Song cache limit",
@@ -600,7 +601,9 @@ fun SettingsScreen(
                 },
             )
         }
+        }
 
+        if (advanced) {
         SettingsGroup(
             header = "Miscellaneous",
             footer = "When enabled, closing the app from the recent apps screen will also stop music playback.",
@@ -659,6 +662,7 @@ fun SettingsScreen(
                 },
                 onClick = { AppSettings.setHideVolumeBar(!hideVolumeBar) },
             )
+        }
         }
 
         SettingsGroup(header = "About") {
