@@ -57,6 +57,14 @@ data class StreamFormat(
 data class SourceStream(
     val url: String,
     val format: StreamFormat = StreamFormat(),
+    /**
+     * The name of the source that produced this stream, when one did — a
+     * module's [MusicSource.displayName], carried so the stats panel can say
+     * where the audio came from without the resolver being asked again. Null
+     * for streams the app built itself (a YouTube URL, a local file), which is
+     * the honest answer: nobody "served" those.
+     */
+    val sourceLabel: String? = null,
     val headers: Map<String, String> = emptyMap(),
     /**
      * Whether this is less than was asked for, taken because nothing better

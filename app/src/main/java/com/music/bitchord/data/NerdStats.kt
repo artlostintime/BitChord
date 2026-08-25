@@ -32,6 +32,23 @@ object NerdStats {
         val bitDepth: Int? = null,
         /** What the source said it would serve, when it came from one that says. */
         val claimed: StreamFormat? = null,
+        /**
+         * Which source is actually feeding the decoder — a module's name,
+         * "YouTube Music", or "Local file". Set by [publishNerdStats] from the
+         * serving source, never guessed at: a null here would mean "unknown",
+         * and the panel would rather print a name it is sure of.
+         */
+        val sourceLabel: String? = null,
+        /**
+         * Whether the stream is genuinely bit-exact, gated on BOTH the serving
+         * source being able to serve lossless AND the decoder reporting a
+         * lossless codec — see [isLossless]. A module that promised FLAC and
+         * handed the decoder AAC is lossy here, not lossless: the claim alone
+         * must not light the badge, which is the whole point of [isLossless]
+         * being codec-led. Defaults to false so an unpopulated snapshot never
+         * reads as lossless.
+         */
+        val lossless: Boolean = false,
     ) {
         /**
          * Whether what arrived is measurably worse than what was promised.
@@ -169,6 +186,9 @@ object NerdStats {
     /** As [picked], for the richer format a non-YouTube source can state. */
     private val declared = ConcurrentHashMap<String, StreamFormat>()
 
+    /** The name of the source that handed over each [declared] stream, keyed alike. */
+    private val declaredSource = ConcurrentHashMap<String, String>()
+
     fun onStreamPicked(videoId: String, kbps: Int) {
         if (kbps <= 0) return
         // Enough for the queue in hand; this is a lookup, not a store.
@@ -176,11 +196,20 @@ object NerdStats {
         picked[videoId] = kbps
     }
 
-    /** Recorded as a source hands over a stream, keyed by that source's own track id. */
-    fun onSourceStream(trackId: String?, format: StreamFormat) {
+    /**
+     * Recorded as a source hands over a stream, keyed by that source's own
+     * track id. [sourceLabel] is the source's name when one served it — see
+     * [sourceLabel]; a YouTube or local stream never reaches here, so its
+     * absence is what tells the panel "YouTube Music" rather than a module.
+     */
+    fun onSourceStream(trackId: String?, format: StreamFormat, sourceLabel: String? = null) {
         if (trackId.isNullOrBlank()) return
         if (declared.size >= MAX_REMEMBERED) declared.clear()
         declared[trackId] = format
+        if (sourceLabel != null) {
+            if (declaredSource.size >= MAX_REMEMBERED) declaredSource.clear()
+            declaredSource[trackId] = sourceLabel
+        }
     }
 
     fun pickedBitrateKbps(videoId: String?): Int? = videoId?.let { picked[it] }
@@ -196,7 +225,10 @@ object NerdStats {
      * FLAC swap leaves the "Lossless" badge lit over plain Opus.
      */
     fun clearDeclared(trackId: String?) {
-        if (trackId != null) declared.remove(trackId)
+        if (trackId != null) {
+            declared.remove(trackId)
+            declaredSource.remove(trackId)
+        }
     }
 
     /**
@@ -209,6 +241,20 @@ object NerdStats {
         return declared[key]
             ?: com.music.bitchord.data.sources.SourceRegistry.parseTrackKey(key)
                 ?.second?.let { declared[it] }
+    }
+
+    /**
+     * The name of the source serving [mediaId], or null when none recorded one
+     * — which for this app means YouTube or a local file, both of which the
+     * panel labels without asking here. Mirrors [declaredFormat]'s key
+     * unwrapping so a module track keyed by its upstream id resolves to the
+     * same name [onSourceStream] stored under.
+     */
+    fun sourceLabel(mediaId: String?): String? {
+        val key = mediaId ?: return null
+        return declaredSource[key]
+            ?: com.music.bitchord.data.sources.SourceRegistry.parseTrackKey(key)
+                ?.second?.let { declaredSource[it] }
     }
 
     /**
@@ -247,6 +293,7 @@ object NerdStats {
         racingLossless.value = emptySet()
         picked.clear()
         declared.clear()
+        declaredSource.clear()
     }
 
     private const val MAX_REMEMBERED = 64

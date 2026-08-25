@@ -1036,6 +1036,41 @@ fun NowPlayingScreen(
                                     textAlign = TextAlign.Center,
                                 )
                             }
+                            // Where the audio came from, and whether it is
+                            // genuinely bit-exact — see [NerdStats.Snapshot.sourceLabel]
+                            // and [NerdStats.Snapshot.lossless]. A second line
+                            // under the measured stats, same row styling.
+                            nerdStats?.sourceLine()?.let { line ->
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                ) {
+                                    Text(
+                                        text = line,
+                                        style = nerdStyle,
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (nerdStats.lossless) "Lossless" else "Lossy",
+                                        style = nerdStyle,
+                                        // Lossless in the accent, lossy in the
+                                        // muted on-surface variant — see
+                                        // [NerdStats.Snapshot.lossless].
+                                        color = if (nerdStats.lossless) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                             // Only when Automix is actually switched on:
                             // otherwise this would report on analysis nothing is
                             // going to use, which is noise rather than a stat.
@@ -2920,6 +2955,30 @@ private fun NerdStats.Snapshot.describe(): String? {
         if (downgraded) add("↓ from ${claimed?.summary}")
     }
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
+}
+
+/**
+ * "Source: Qobuz module · Codec: FLAC · 24-bit/96.0 kHz" — the one line that
+ * says where the audio came from and what it actually is, for the stats panel.
+ *
+ * [NerdStats.Snapshot.sourceLabel] names the source; the codec and rate are the
+ * decoder's own figures, the same ones [describe] uses, so a depth the renderer
+ * hasn't stated is dropped rather than guessed at. The "Lossless"/"Lossy" tag
+ * this line sits beside is [NerdStats.Snapshot.lossless] — codec-led, so a
+ * FLAC-labelled module that served AAC reads "Lossy" here, not "Lossless".
+ */
+private fun NerdStats.Snapshot.sourceLine(): String? {
+    val label = sourceLabel ?: return null
+    val rate = sampleRateHz?.let { "%.1f".format(it / 1000f) }
+    return buildList {
+        add("Source: $label")
+        codecLabel(mimeType)?.let { add("Codec: $it") }
+        when {
+            bitDepth != null && rate != null -> add("${bitDepth}-bit/${rate}kHz")
+            bitDepth != null -> add("${bitDepth}-bit")
+            rate != null -> add("${rate}kHz")
+        }
+    }.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
 
 /** The codec under its usual name rather than its MIME type. */

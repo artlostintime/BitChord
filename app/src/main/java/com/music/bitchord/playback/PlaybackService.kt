@@ -489,7 +489,7 @@ class PlaybackService : MediaSessionService() {
                 val stream = runBlocking(about) {
                     withTimeout(RESOLVE_TIMEOUT_MS) { SourceResolver.resolve(dataSpec.uri) }
                 } ?: throw java.io.IOException("No enabled source could serve ${dataSpec.uri.getQueryParameter("n")}")
-                NerdStats.onSourceStream(dataSpec.uri.getQueryParameter("t"), stream.format)
+                NerdStats.onSourceStream(dataSpec.uri.getQueryParameter("t"), stream.format, stream.sourceLabel)
                 return@Factory dataSpec.buildUpon()
                     .setUri(Uri.parse(stream.url))
                     .setHttpRequestHeaders(stream.headers)
@@ -509,7 +509,7 @@ class PlaybackService : MediaSessionService() {
                 // the lossy stream still coming out of the speaker. The real
                 // open, moments later, records it.
                 val proving = QualityUpgrade.isAuditioning(videoId)
-                if (!proving) NerdStats.onSourceStream(videoId, upgraded.format)
+                if (!proving) NerdStats.onSourceStream(videoId, upgraded.format, upgraded.sourceLabel)
                 // Logged because the alternative — a swap that silently never
                 // reached its stream — is indistinguishable in the logs from
                 // one that reached it and got nothing back, and the two have
@@ -580,7 +580,7 @@ class PlaybackService : MediaSessionService() {
             }
             when (won) {
                 is Resolved.Module -> {
-                    NerdStats.onSourceStream(videoId, won.stream.format)
+                    NerdStats.onSourceStream(videoId, won.stream.format, won.stream.sourceLabel)
                     StreamChoice.remember(videoId, won.stream, substituted = true)
                     dataSpec.buildUpon()
                         .setUri(Uri.parse(won.stream.url))
@@ -1453,6 +1453,7 @@ class PlaybackService : MediaSessionService() {
             // NerdStats cleanup for why the pre-upgrade claim has to be
             // captured here rather than looked up again on revert.
             val previousFormat = NerdStats.declaredFormat(mediaId)
+            val previousLabel = NerdStats.sourceLabel(mediaId)
             swappingMediaId = mediaId
             swapCutAt = SystemClock.elapsedRealtime()
             player.replaceMediaItem(
@@ -1463,7 +1464,7 @@ class PlaybackService : MediaSessionService() {
             player.prepare()
             QualityUpgrade.unshelve(mediaId)
             TrackLog.d("BitChord", "upgraded to ${stream.format.summary} at ${now.position}ms")
-            watchUpgrade(mediaId, now.uri, now.position, now.duration, previousFormat)
+            watchUpgrade(mediaId, now.uri, now.position, now.duration, previousFormat, previousLabel)
             // The opening again, this time sized for Automix rather than for
             // a container header.
             //
@@ -1754,6 +1755,7 @@ class PlaybackService : MediaSessionService() {
         position: Long,
         previousDuration: Long,
         previousFormat: StreamFormat?,
+        previousLabel: String? = null,
     ) {
         if (previousDuration <= 0) return
         scope.launch(TrackLog.about(mediaId)) {
@@ -1795,7 +1797,7 @@ class PlaybackService : MediaSessionService() {
             // keep calling the fallback lossless after the upgrade it
             // borrowed that claim from got reverted.
             if (previousFormat != null) {
-                NerdStats.onSourceStream(mediaId, previousFormat)
+                NerdStats.onSourceStream(mediaId, previousFormat, previousLabel)
             } else {
                 NerdStats.clearDeclared(mediaId)
             }
@@ -1967,6 +1969,26 @@ class PlaybackService : MediaSessionService() {
         val player = player ?: return
         val format = player.audioFormat
         val mediaId = player.currentMediaItem?.mediaId
+        val song = player.currentMediaItem?.toSong()
+        val isLocal = song?.localUri != null || song?.localPath != null
+        // The name a module served under, if one did — see [NerdStats.sourceLabel].
+        // Null means YouTube (or a local file, handled just below): a module
+        // always records its name when it hands over a stream, so this is never
+        // "unknown", only "not a module".
+        val moduleLabel = NerdStats.sourceLabel(mediaId)
+        val sourceLabel = when {
+            isLocal -> "Local file"
+            moduleLabel != null -> moduleLabel
+            else -> "YouTube Music"
+        }
+        // Only a module can serve bit-exact audio (SourceKind.MODULE.canServeLossless);
+        // YouTube cannot, and a local file is whatever its codec is — "capable" by
+        // definition, so the codec check below is the whole decision. Gating on the
+        // source this way is what stops a FLAC-labelled module that quietly served
+        // AAC from reading as lossless: the codec is the verdict, the source only
+        // widens the door it is allowed to walk through.
+        val sourceLosslessCapable = isLocal || moduleLabel != null
+        val lossless = sourceLosslessCapable && NerdStats.isLosslessMime(format?.sampleMimeType)
         NerdStats.current.value = NerdStats.Snapshot(
             mimeType = format?.sampleMimeType,
             bitrateKbps = format?.bitrate?.takeIf { it != Format.NO_VALUE }?.div(1000)
@@ -1976,6 +1998,8 @@ class PlaybackService : MediaSessionService() {
             channels = format?.channelCount?.takeIf { it != Format.NO_VALUE },
             bitDepth = format?.pcmEncoding?.let(::bitDepthOf),
             claimed = NerdStats.declaredFormat(mediaId),
+            sourceLabel = sourceLabel,
+            lossless = lossless,
         )
     }
 

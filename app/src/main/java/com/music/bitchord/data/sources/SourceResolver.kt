@@ -472,7 +472,14 @@ object SourceResolver {
             // The row this URL came from knows how long the recording is; the
             // URL itself doesn't. Carried along so a caller swapping this into
             // a track already playing can check it — see [SourceStream.durationSec].
-            val stream = opened.copy(durationSec = TrackMatcher.secondsOf(match.durationText))
+            // [SourceStream.sourceLabel] rides along for the same reason: every
+            // stream this method returns was produced by [source], so naming it
+            // here means the stats panel can report the serving source without
+            // any caller having to thread it through — see [NerdStats.sourceLabel].
+            val stream = opened.copy(
+                durationSec = TrackMatcher.secondsOf(match.durationText),
+                sourceLabel = source.displayName,
+            )
             val served = stream.format
             if (!wantsLossless || served.isLossless == true || served.statesNothingLossy) {
                 TrackLog.d(
