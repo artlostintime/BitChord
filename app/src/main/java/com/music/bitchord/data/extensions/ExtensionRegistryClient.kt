@@ -1,6 +1,8 @@
 package com.music.bitchord.data.extensions
 
 import com.music.bitchord.data.Http
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Request
@@ -49,8 +51,10 @@ object ExtensionRegistryClient {
      * the whole fetch — the user may have one bad URL among good ones, and the
      * others should still resolve.
      */
-    suspend fun fetch(repoUrls: List<String>): List<RegistryEntry> {
+    suspend fun fetch(repoUrls: List<String>): List<RegistryEntry> = withContext(Dispatchers.IO) {
         val merged = LinkedHashMap<String, RegistryEntry>()
+        var hadFailure = false
+        var lastError: Throwable? = null
         for (url in repoUrls.filter { it.isNotBlank() }) {
             runCatching {
                 val body = Http.client.newCall(Request.Builder().url(url).build()).execute().use {
@@ -61,8 +65,17 @@ object ExtensionRegistryClient {
                 for (entry in doc.extensions) {
                     if (entry.id.isNotBlank()) merged.putIfAbsent(entry.id, entry)
                 }
+            }.onFailure {
+                hadFailure = true
+                lastError = it
             }
         }
-        return merged.values.toList()
+        // Every repo failed to load: surface it so the screen shows the error
+        // instead of a silent "no extensions". A repo that resolves but is
+        // genuinely empty still returns an empty list (not an error).
+        if (merged.isEmpty() && hadFailure) {
+            throw lastError ?: Exception("Failed to load extensions")
+        }
+        merged.values.toList()
     }
 }

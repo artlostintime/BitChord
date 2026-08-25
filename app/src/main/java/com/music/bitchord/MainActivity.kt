@@ -632,7 +632,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
         // One back step out of Settings, or out of any tab but Home, lands on
         // Home rather than exiting — only Home itself hands back to the system,
         // which is what actually closes/minimizes the app.
-        BackHandler(enabled = showSettings && !showAccountScrobbling) {
+        BackHandler(enabled = showSettings && !showAccountScrobbling && !showExtensions) {
             showSettings = false
             if (detail == null) selectedTab = TAB_HOME
         }
