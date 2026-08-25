@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -66,6 +67,8 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.download.DownloadState
 import com.music.bitchord.download.Downloads
+import com.music.bitchord.data.NerdStats
+import com.music.bitchord.data.codecLabel
 import com.music.bitchord.playback.SleepTimer
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.theme.ArtworkPalette
@@ -133,6 +136,9 @@ fun SongActionsSheet(
     resolvingLinks: Boolean = false,
 ) {
     var pickingSleepTimer by remember { mutableStateOf(false) }
+    // The detailed metadata view, swapped in over the actions like the sleep
+    // timer picker — both are "drill into this song" rather than an action.
+    var showingInfo by remember { mutableStateOf(false) }
     // Read from the thumbnail the row that opened this sheet was already
     // showing, not a larger copy of it: the tint is a blur and a handful of
     // swatches, neither of which a bigger image improves, and going back for
@@ -147,6 +153,10 @@ fun SongActionsSheet(
     TintedSheet(palette = palette, imageUrl = song.thumbnailUrl, modifier = modifier) {
         if (pickingSleepTimer) {
             SleepTimerPicker(palette = palette, onBack = { pickingSleepTimer = false })
+            return@TintedSheet
+        }
+        if (showingInfo) {
+            SongInfoView(song = song, palette = palette, onBack = { showingInfo = false })
             return@TintedSheet
         }
 
@@ -201,6 +211,12 @@ fun SongActionsSheet(
             label = "Add to queue",
             accent = palette.accent,
             onClick = onAddToQueue,
+        )
+        ActionRow(
+            icon = Icons.Rounded.Info,
+            label = "Info",
+            accent = palette.accent,
+            onClick = { showingInfo = true },
         )
         when (val id = song.albumId) {
             null -> if (resolvingLinks) LoadingActionRow(Icons.Rounded.Album, "Open album", palette)
@@ -644,4 +660,88 @@ internal fun SheetHeading(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 4.dp),
     )
+}
+
+/**
+ * Detailed metadata for the current song, opened from the actions sheet's
+ * "Info" row. Lists every field that actually has a value; rows whose data is
+ * null are omitted rather than shown as placeholders. Song fields come from the
+ * model, technical figures from [NerdStats.current] — the same global the
+ * player's stats line reads, so the two never disagree.
+ */
+@Composable
+private fun SongInfoView(
+    song: Song,
+    palette: ArtworkPalette,
+    onBack: () -> Unit,
+) {
+    val snap by NerdStats.current.collectAsStateWithLifecycle()
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 22.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Song info",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = palette.divider)
+
+        val rows = buildList {
+            add("Title" to song.title)
+            add("Artist" to song.artist)
+            song.albumName?.let { add("Album" to it) }
+            song.durationText?.let { add("Duration" to it) }
+            snap?.let { s ->
+                codecLabel(s.mimeType)?.let { add("Codec" to it) }
+                s.bitrateKbps?.let { add("Bitrate" to "$it kbps") }
+                s.sampleRateHz?.let { add("Sample rate" to "%.1f kHz".format(it / 1000f)) }
+                s.bitDepth?.let { add("Bit depth" to "$it-bit") }
+                add("Lossless/Lossy" to if (s.isLossless) "Lossless" else "Lossy")
+                s.mimeType?.let { add("File format" to it) }
+            }
+        }
+        rows.forEach { (label, value) -> InfoRow(label = label, value = value, palette = palette) }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** One labelled row of the Info view: name on the left, value on the right. */
+@Composable
+private fun InfoRow(label: String, value: String, palette: ArtworkPalette) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.onBackgroundVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

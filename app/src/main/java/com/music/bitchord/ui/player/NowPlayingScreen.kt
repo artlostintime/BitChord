@@ -126,6 +126,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import com.music.bitchord.data.codecLabel
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -140,7 +143,6 @@ import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.NerdStats
-import com.music.bitchord.data.settings.TrackAnalysisState
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.canvas.CanvasRepository
 import com.music.bitchord.data.lyrics.LyricLine
@@ -854,12 +856,6 @@ fun NowPlayingScreen(
             // needs these before the seek bar does.
             val showNerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
             val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
-            // Hoisted alongside the other two rather than read where it is drawn:
-            // the stats block is inside a condition that flips as the sleeve
-            // collapses, and re-subscribing to a flow on every frame of that
-            // collapse is a waste of a subscription.
-            val smartFadeOn by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
-            val smartAnalysis by AppSettings.smartAnalysis.collectAsStateWithLifecycle()
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
@@ -1026,74 +1022,40 @@ fun NowPlayingScreen(
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .graphicsLayer { alpha = 1f - p * 2f },
                         ) {
-                            nerdStats?.describe()?.let { stats ->
-                                Text(
-                                    text = stats,
-                                    style = nerdStyle,
-                                    color = Color.White.copy(alpha = 0.65f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                            // Where the audio came from, and whether it is
-                            // genuinely bit-exact — see [NerdStats.Snapshot.sourceLabel]
-                            // and [NerdStats.Snapshot.lossless]. A second line
-                            // under the measured stats, same row styling.
+                            // One clean line: codec · quality · verdict,
+                            // Apple-Music-style. Secondary detail (source,
+                            // Automix) dropped from the main view; the full
+                            // breakdown lives in the Info sheet.
                             nerdStats?.let { snap ->
-                                snap.sourceLine()?.let { line ->
-                                    Row(
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(top = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = line,
-                                            style = nerdStyle,
-                                            color = Color.White.copy(alpha = 0.65f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = TextAlign.Center,
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = if (snap.lossless) "Lossless" else "Lossy",
-                                            style = nerdStyle,
-                                            // Lossless in the accent, lossy in the
-                                            // muted on-surface variant — see
-                                            // [NerdStats.Snapshot.lossless].
-                                            color = if (snap.lossless) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                snap.summaryLine()?.let { summary ->
+                                    val verdict = if (snap.isLossless) "Lossless" else "Lossy"
+                                    val annotated = buildAnnotatedString {
+                                        val prefix = summary.removeSuffix(" · $verdict")
+                                        append(prefix)
+                                        if (prefix != summary) {
+                                            append(" · ")
+                                            pushStyle(
+                                                SpanStyle(
+                                                    color = if (snap.isLossless) {
+                                                        MaterialTheme.colorScheme.primary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                    },
+                                                ),
+                                            )
+                                            append(verdict)
+                                            pop()
+                                        }
                                     }
+                                    Text(
+                                        text = annotated,
+                                        style = nerdStyle,
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center,
+                                    )
                                 }
-                            }
-                            // Only when Automix is actually switched on:
-                            // otherwise this would report on analysis nothing is
-                            // going to use, which is noise rather than a stat.
-                            if (smartFadeOn) {
-                                Text(
-                                    // Both sides always named, even when they
-                                    // agree, so the line reads the same way every
-                                    // time and the eye can find the half it wants
-                                    // without re-parsing the sentence.
-                                    text = "Automix · this song " +
-                                        smartAnalysis.current.label() +
-                                        " · next " + smartAnalysis.next.label(),
-                                    style = nerdStyle,
-                                    // Dimmer than the measured line above it: that
-                                    // one describes the audio, this one describes
-                                    // the app, and the ranking should show.
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                )
                             }
                         }
                     }
@@ -2927,79 +2889,31 @@ private fun ShimmerText(text: String) {
 }
 
 /**
- * "FLAC · 24-bit · 96.0 kHz · Stereo" — whichever of those the player has
- * actually reported. A figure it hasn't is dropped rather than filled in, so a
- * short line means little was known, never that something was invented.
+ * One clean line for the sleeve: codec · quality · verdict, Apple-Music-style.
+ * e.g. "FLAC · 24-bit/44.1 kHz · Lossless" or "Opus · 171 kbps · Lossy".
  *
- * Bitrate is omitted once the stream is known to be lossless: the number is
- * real but says nothing useful about the quality, and reading "1411 kbps" next
- * to "FLAC" invites the comparison with a lossy figure that the two do not
- * support.
- *
- * A stream that arrived worse than its source promised gets that stated
- * outright rather than left to be spotted — see [NerdStats.Snapshot.downgraded].
+ * Presentation only — every figure comes straight from this snapshot, and the
+ * raw fields are left untouched. The full breakdown (source, channels, …)
+ * lives in the Info sheet, so this stays to the essentials.
  */
-private fun NerdStats.Snapshot.describe(): String? {
-    val parts = buildList {
-        codecLabel(mimeType)?.let(::add)
-        bitDepth?.let { add("$it-bit") }
-        if (!isLossless) bitrateKbps?.let { add("$it kbps") }
-        sampleRateHz?.let { add("%.1f kHz".format(it / 1000f)) }
-        channels?.let {
-            add(
-                when (it) {
-                    1 -> "Mono"
-                    2 -> "Stereo"
-                    else -> "$it ch"
-                },
-            )
-        }
-        if (downgraded) add("↓ from ${claimed?.summary}")
-    }
-    return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
-}
-
-/**
- * "Source: Qobuz module · Codec: FLAC · 24-bit/96.0 kHz" — the one line that
- * says where the audio came from and what it actually is, for the stats panel.
- *
- * [NerdStats.Snapshot.sourceLabel] names the source; the codec and rate are the
- * decoder's own figures, the same ones [describe] uses, so a depth the renderer
- * hasn't stated is dropped rather than guessed at. The "Lossless"/"Lossy" tag
- * this line sits beside is [NerdStats.Snapshot.lossless] — codec-led, so a
- * FLAC-labelled module that served AAC reads "Lossy" here, not "Lossless".
- */
-private fun NerdStats.Snapshot.sourceLine(): String? {
-    val label = sourceLabel ?: return null
-    val rate = sampleRateHz?.let { "%.1f".format(it / 1000f) }
-    return buildList {
-        add("Source: $label")
-        codecLabel(mimeType)?.let { add("Codec: $it") }
+private fun NerdStats.Snapshot.summaryLine(): String? {
+    val codec = codecLabel(mimeType) ?: return null
+    val quality = if (isLossless) {
+        val rate = sampleRateHz?.let { "%.1f kHz".format(it / 1000f) }
         when {
-            bitDepth != null && rate != null -> add("${bitDepth}-bit/${rate}kHz")
-            bitDepth != null -> add("${bitDepth}-bit")
-            rate != null -> add("${rate}kHz")
+            bitDepth != null && rate != null -> "$bitDepth-bit/$rate"
+            bitDepth != null -> "$bitDepth-bit"
+            rate != null -> rate
+            else -> null
         }
-    }.joinToString(" · ").takeIf { it.isNotEmpty() }
+    } else {
+        bitrateKbps?.let { "$it kbps" }
+    }
+    val verdict = if (isLossless) "Lossless" else "Lossy"
+    return buildList {
+        add(codec)
+        quality?.let(::add)
+        add(verdict)
+    }.joinToString(" · ")
 }
 
-/** The codec under its usual name rather than its MIME type. */
-private fun codecLabel(mimeType: String?): String? = when {
-    mimeType == null -> null
-    mimeType.endsWith("opus") -> "Opus"
-    mimeType.endsWith("mp4a-latm") -> "AAC"
-    mimeType.endsWith("vorbis") -> "Vorbis"
-    mimeType.endsWith("mpeg") -> "MP3"
-    mimeType.endsWith("flac") -> "FLAC"
-    mimeType.endsWith("alac") -> "ALAC"
-    else -> mimeType.substringAfter('/').uppercase()
-}
-
-/** Wording for the stats line; see [TrackAnalysisState]. */
-private fun TrackAnalysisState.label(): String = when (this) {
-    TrackAnalysisState.ANALYSED -> "analysed"
-    TrackAnalysisState.REFINING -> "analysed, refining…"
-    TrackAnalysisState.ANALYSING -> "analysing…"
-    TrackAnalysisState.WAITING -> "waiting"
-    TrackAnalysisState.FAILED -> "failed"
-}
