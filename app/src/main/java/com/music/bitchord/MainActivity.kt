@@ -794,8 +794,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     val spotifyReady = viewModel.spotifySpDc != null &&
                         spotifyHome is UiState.Success &&
                         spotifyHome.data.isNotEmpty()
-                    val ytReady = signedIn &&
-                        ytHome is UiState.Success &&
+                    val ytReady = ytHome is UiState.Success &&
                         ytHome.data.isNotEmpty()
                     // The chosen recommendation source wins; if it isn't
                     // available, fall back to the other signed-in service, then

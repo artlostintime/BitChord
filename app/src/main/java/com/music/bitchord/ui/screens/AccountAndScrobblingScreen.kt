@@ -130,8 +130,6 @@ fun AccountAndScrobblingScreen(
                 "switch anytime — login and recommendation source are separate.",
         ) {
             val source by AppSettings.recommendationSource.collectAsStateWithLifecycle()
-            val googleOn = signedIn
-            val spotifyOn = spotifySignedIn
             Column(Modifier.padding(horizontal = ROW_INSET, vertical = 12.dp)) {
                 Text(
                     text = "Recommendations from",
@@ -140,9 +138,8 @@ fun AccountAndScrobblingScreen(
                 )
                 Spacer(Modifier.height(10.dp))
                 SegmentedControl(
-                    options = listOf("Google", "Spotify"),
+                    options = listOf("YouTube Music", "Spotify"),
                     selectedIndex = if (source == RecommendationSource.SPOTIFY) 1 else 0,
-                    enabledOptions = listOf(googleOn, spotifyOn),
                     onSelect = { index ->
                         AppSettings.setRecommendationSource(
                             if (index == 1) RecommendationSource.SPOTIFY else RecommendationSource.GOOGLE,

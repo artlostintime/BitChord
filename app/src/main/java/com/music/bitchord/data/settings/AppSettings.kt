@@ -36,11 +36,11 @@ enum class ThemeMode(val label: String) {
  *
  * Login method and recommendation source are independent: a user may be
  * signed into either, both, or neither, and switch the feed source at any
- * time without re-authenticating. Defaults to Google — the legacy behaviour,
+ * time without re-authenticating. Defaults to YouTube Music — the legacy behaviour,
  * where the YT home was always shown unless Spotify happened to be signed in.
  */
 enum class RecommendationSource(val label: String) {
-    GOOGLE("Google"), SPOTIFY("Spotify")
+    GOOGLE("YouTube Music"), SPOTIFY("Spotify")
 }
 
 /**
@@ -542,7 +542,7 @@ object AppSettings {
         prefs.edit().putString(KEY_SOURCE_ORDER, value.joinToString(",")).apply()
     }
 
-    /** Writes through to prefs as a name string; an unknown stored value falls back to Google. */
+    /** Writes through to prefs as a name string; an unknown stored value falls back to YouTube Music. */
     fun setRecommendationSource(value: RecommendationSource) {
         recommendationSource.value = value
         prefs.edit().putString(KEY_RECOMMENDATION_SOURCE, value.name).apply()
