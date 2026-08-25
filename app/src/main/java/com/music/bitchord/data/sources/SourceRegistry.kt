@@ -105,25 +105,27 @@ object SourceRegistry {
             .filter { kind -> stored.none { it.kind == kind } }
             .map { SourceConfig(kind = it, enabled = true) }
 
-        // If a module index URL was baked in at build time, ensure it is the
-        // one stored — add the module source if missing, or silently update its
-        // URL if it changed. The toggle’s enabled state is always preserved so
-        // the user’s on/off choice survives an app update.
+        // The module source is what makes lossless/HQ audio possible, so it is
+        // always seeded — like YOUTUBE and LOCAL — instead of only when a build
+        // happens to bake in MODULE_INDEX_URL. A build that does (or a user who
+        // adds one in Sources) supplies the index URL; without it the source
+        // simply stays incomplete and the toggle reports that honestly, rather
+        // than the app claiming lossless is entirely absent. The toggle’s
+        // enabled state is always preserved so the user’s on/off choice
+        // survives an app update.
         val envUrl = BuildConfig.MODULE_INDEX_URL.trim()
-        val after = if (envUrl.isNotEmpty()) {
+        val after = run {
             val existingModule = seeded.firstOrNull { it.kind == SourceKind.MODULE }
             if (existingModule == null) {
+                // Always present so the lossless toggle has something to switch;
+                // baseUrl is empty until a build or the user provides an index.
                 seeded + SourceConfig(kind = SourceKind.MODULE, baseUrl = envUrl, enabled = true)
-            } else if (existingModule.baseUrl != envUrl) {
+            } else if (envUrl.isNotEmpty() && existingModule.baseUrl != envUrl) {
                 seeded.map { if (it.kind == SourceKind.MODULE) it.copy(baseUrl = envUrl) else it }
             } else {
+                // Keep the user's stored module config (URL + enabled state) as-is.
                 seeded
             }
-        } else {
-            // No env URL: keep whatever the user had stored, but ensure there
-            // is no leftover env-managed module config lying around from a
-            // previous build that did have one.
-            seeded
         }
 
         publish(after, persist = after != stored)

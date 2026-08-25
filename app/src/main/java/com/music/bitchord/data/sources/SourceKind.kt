@@ -69,10 +69,10 @@ enum class SourceKind(
      * reorders — see [SourceRegistry.active].
      */
     LOCAL(
-        label = "Local files",
-        detail = "Audio on this device and downloads, played straight from " +
-            "disk. Offline, and bit-exact when the file is a FLAC.",
-        labels = listOf("Offline", "Lossless", "No account"),
+        label = "Offline Mode",
+        detail = "Only your downloaded songs, played straight from disk with " +
+            "no internet needed. Offline, and bit-exact when the file is a FLAC.",
+        labels = listOf("Offline", "Downloaded only", "No account"),
         needsServer = false,
         canServeLossless = true,
     ),

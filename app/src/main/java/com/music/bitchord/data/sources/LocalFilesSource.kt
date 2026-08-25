@@ -7,13 +7,15 @@ import com.music.bitchord.data.model.Song
 import java.io.File
 
 /**
- * The device's own audio — MediaStore plus the app's downloads — played
- * straight from disk through [LocalMediaRepository].
+ * "Offline Mode" — the app's downloaded songs, played straight from disk
+ * through [LocalMediaRepository.getDownloadedSongs] (the downloads table).
  *
- * No network, no account, no module VM: a local FLAC is bit-exact, so this
+ * No network, no account, no module VM: a downloaded FLAC is bit-exact, so this
  * source is lossless-capable and, placed high enough in the user's order,
  * outranks a lossy stream for the same recording. It is seeded as a built-in
- * like [YouTubeSource] and can only be disabled, not deleted.
+ * like [YouTubeSource] and can only be disabled, not deleted. It serves ONLY
+ * downloaded audio — never a MediaStore scan of the whole device — so the app
+ * behaves as an offline player when this is the only enabled source.
  *
  * Search returns [Song]s whose [Song.videoId] is this source's
  * [trackKey][SourceRegistry.trackKey] wrapping the file's own URI, so a result
@@ -66,7 +68,7 @@ class LocalFilesSource(
         )
     }
 
-    /** Device library + downloads, rescanned at most once per [CACHE_TTL_MS]. */
+    /** Downloaded-only library, rescanned at most once per [CACHE_TTL_MS]. */
     private var cache: Pair<Long, List<Song>>? = null
     private suspend fun allSongs(): List<Song> {
         val now = System.currentTimeMillis()
@@ -75,8 +77,9 @@ class LocalFilesSource(
         // ponytail: no MediaStore observer, so a file added or removed between
         // windows is invisible until the next miss. Lower TTL or register a
         // ContentObserver if freshness matters more than a periodic rescan.
-        val songs = LocalMediaRepository.getLocalMusic(appContext) +
-            LocalMediaRepository.getDownloadedSongs(appContext)
+        // Offline Mode serves ONLY downloaded songs (the downloads table), not a
+        // MediaStore scan of the whole device — see class doc.
+        val songs = LocalMediaRepository.getDownloadedSongs(appContext)
         cache = now to songs
         return songs
     }

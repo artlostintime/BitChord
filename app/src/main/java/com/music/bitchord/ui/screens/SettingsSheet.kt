@@ -160,11 +160,14 @@ fun SettingsScreen(
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
 
     // Lossless needs a module source — the only kind that can serve bit-exact
-    // audio. Derived from the configs flow (not the build constant) so the row
-    // recomposes the moment the module is added, enabled or removed.
-    val losslessConfigured = sourceConfigs.any { it.kind == SourceKind.MODULE }
+    // audio from a streaming backend. The config is always seeded at startup
+    // (see SourceRegistry.init); what decides whether lossless can actually
+    // play is whether that module has a usable index URL (isComplete).
+    val moduleConfig = sourceConfigs.firstOrNull { it.kind == SourceKind.MODULE }
+    val losslessConfigured = moduleConfig != null
+    val moduleComplete = moduleConfig?.isComplete == true
     // Whether the module source is currently enabled (toggle state).
-    val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
+    val moduleEnabled = moduleConfig?.enabled == true && moduleComplete
 
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -232,7 +235,8 @@ fun SettingsScreen(
                 title = "Lossless / HQ Audio",
                 subtitle = if (!losslessConfigured) null else
                     if (moduleEnabled) "Turn off if its playing a different version of the song or another song. Restart Required!"
-                    else "Turn on to experience lossless music quality. Restart Required!",
+                    else if (moduleComplete) "Turn on to experience lossless music quality. Restart Required!"
+                    else "Add a module index URL in Sources to enable lossless audio.",
                 subtitleContent = if (!losslessConfigured) {
                     {
                         Text(
@@ -244,14 +248,14 @@ fun SettingsScreen(
                 } else null,
                 trailing = {
                     Switch(
-                        checked = moduleEnabled && losslessConfigured,
+                        checked = moduleEnabled,
                         onCheckedChange = {
                             if (losslessConfigured) {
                                 SourceRegistry.setModuleEnabled(it)
                                 AudioCache.clear {}
                             }
                         },
-                        enabled = losslessConfigured,
+                        enabled = moduleComplete,
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = MaterialTheme.colorScheme.primary,
                             checkedBorderColor = MaterialTheme.colorScheme.primary,
@@ -259,7 +263,7 @@ fun SettingsScreen(
                     )
                 },
                 onClick = {
-                    if (losslessConfigured) {
+                    if (moduleComplete) {
                         SourceRegistry.setModuleEnabled(!moduleEnabled)
                         AudioCache.clear {}
                     }
@@ -285,9 +289,9 @@ fun SettingsScreen(
 
         SettingsGroup(
             header = "Sources",
-            footer = "Higher sources are tried first. Local files are offline " +
-                "and bit-exact for FLAC — move them up to prefer them over " +
-                "streaming. The order here is what BitChord uses to pick a source.",
+            footer = "Higher sources are tried first. Offline Mode plays only " +
+                "your downloaded songs, with no internet needed — move it up to " +
+                "prefer it over streaming. The order here is what BitChord uses to pick a source.",
         ) {
             val rank = sourceOrder.withIndex().associate { (i, id) -> id to i }
             val sources = sourceConfigs.sortedWith { a, b ->
