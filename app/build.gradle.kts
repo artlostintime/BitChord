@@ -94,16 +94,18 @@ android {
     buildTypes {
         release {
             /*
-             * Off deliberately. Stream resolution runs YouTube's own player
-             * JavaScript through Rhino, and NewPipe, Ktor and
-             * kotlinx.serialization all reach for classes reflectively — none
-             * of which R8 can see. Shrinking that reliably is a set of keep
-             * rules to be written and then proven on a device, because the
-             * breakage it causes appears at runtime rather than at build time.
-             * Until then, a larger APK that works beats a smaller one that
-             * might not. The rules below stay wired up for when it's revisited.
+             * Minify + resource shrinking are ON as of v1.4.1. The app is
+             * reflection-heavy — Rhino runs YouTube's player JS, NewPipe/Ktor/
+             * kotlinx.serialization reach for classes reflectively, and
+             * QuickJS-kt + ONNX bind native callbacks — so app/proguard-rules.pro
+             * now carries explicit keep rules for every known reflective
+             * surface. R8 breakage shows up at RUNTIME, not build time: these
+             * rules MUST be device-tested (stream resolve, Discord RPC, source
+             * extensions, automix) before cutting a stable tag. Debug stays
+             * unminified.
              */
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
