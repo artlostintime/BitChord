@@ -143,23 +143,6 @@ object NerdStats {
     fun isLosslessMime(mimeType: String?): Boolean =
         mimeType != null && LOSSLESS_CODEC_SUFFIXES.any { mimeType.endsWith(it) }
 
-/**
- * The codec under its usual name rather than its MIME type.
- *
- * Shared so the player's stats line and the Info sheet agree on what
- * "audio/mp4a-latm" is called — both should say "AAC", never two spellings.
- */
-fun codecLabel(mimeType: String?): String? = when {
-    mimeType == null -> null
-    mimeType.endsWith("opus") -> "Opus"
-    mimeType.endsWith("mp4a-latm") -> "AAC"
-    mimeType.endsWith("vorbis") -> "Vorbis"
-    mimeType.endsWith("mpeg") -> "MP3"
-    mimeType.endsWith("flac") -> "FLAC"
-    mimeType.endsWith("alac") -> "ALAC"
-    else -> mimeType.substringAfter('/').uppercase()
-}
-
     /**
      * The bitrate a lossy stream has to reach to be worth calling out.
      *
@@ -314,4 +297,21 @@ fun codecLabel(mimeType: String?): String? = when {
     }
 
     private const val MAX_REMEMBERED = 64
+}
+
+/**
+ * The codec under its usual name rather than its MIME type.
+ *
+ * Shared so the player's stats line and the Info sheet agree on what
+ * "audio/mp4a-latm" is called — both should say "AAC", never two spellings.
+ */
+fun codecLabel(mimeType: String?): String? = when {
+    mimeType == null -> null
+    mimeType.endsWith("opus") -> "Opus"
+    mimeType.endsWith("mp4a-latm") -> "AAC"
+    mimeType.endsWith("vorbis") -> "Vorbis"
+    mimeType.endsWith("mpeg") -> "MP3"
+    mimeType.endsWith("flac") -> "FLAC"
+    mimeType.endsWith("alac") -> "ALAC"
+    else -> mimeType.substringAfter('/').uppercase()
 }

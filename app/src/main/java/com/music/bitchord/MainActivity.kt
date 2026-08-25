@@ -825,9 +825,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                                     val songs = viewModel.loadSpotifyPlaylistSongs(id)
                                     if (songs.isNotEmpty()) play(songs, 0)
                                 }
-                                return@onItemClick
-                            }
-                            when {
+                            } else when {
                                 item.videoId != null -> playRadio(
                                     Song(
                                         videoId = item.videoId,
