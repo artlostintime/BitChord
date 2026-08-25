@@ -47,6 +47,8 @@ import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Waves
@@ -55,6 +57,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -95,7 +98,6 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.data.model.Account
-import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceKind
@@ -124,6 +126,7 @@ fun SettingsScreen(
     onSignOut: () -> Unit,
     onAccountScrobbling: () -> Unit,
     onLyricsSources: () -> Unit,
+    onExtensions: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -149,13 +152,16 @@ fun SettingsScreen(
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
+    val sourceOrder by AppSettings.sourceOrder.collectAsStateWithLifecycle()
     val lossless by AppSettings.losslessAudio.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
 
-    // Whether the module index URL is baked into this build.
-    val losslessConfigured = BuildConfig.MODULE_INDEX_URL.trim().isNotEmpty()
+    // Lossless needs a module source — the only kind that can serve bit-exact
+    // audio. Derived from the configs flow (not the build constant) so the row
+    // recomposes the moment the module is added, enabled or removed.
+    val losslessConfigured = sourceConfigs.any { it.kind == SourceKind.MODULE }
     // Whether the module source is currently enabled (toggle state).
     val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
 
@@ -273,6 +279,62 @@ fun SettingsScreen(
                 badge = "In use".takeIf { metered == true },
                 value = cellularQuality.label,
                 onClick = { picking = QualityTarget.CELLULAR },
+            )
+        }
+
+        SettingsGroup(
+            header = "Sources",
+            footer = "Higher sources are tried first. Local files are offline " +
+                "and bit-exact for FLAC — move them up to prefer them over " +
+                "streaming. The order here is what BitChord uses to pick a source.",
+        ) {
+            val rank = sourceOrder.withIndex().associate { (i, id) -> id to i }
+            val sources = sourceConfigs.sortedWith { a, b ->
+                val ra = rank[a.id] ?: Int.MAX_VALUE
+                val rb = rank[b.id] ?: Int.MAX_VALUE
+                if (ra != rb) ra.compareTo(rb) else a.kind.ordinal.compareTo(b.kind.ordinal)
+            }
+            sources.forEachIndexed { index, cfg ->
+                val on = cfg.enabled && cfg.isComplete
+                SettingsRow(
+                    icon = when (cfg.kind) {
+                        SourceKind.LOCAL -> Icons.Rounded.Storage
+                        SourceKind.MODULE -> Icons.Rounded.Cloud
+                        SourceKind.YOUTUBE -> Icons.Rounded.Language
+                        SourceKind.EXTENSION -> Icons.Rounded.Extension
+                    },
+                    title = cfg.displayName,
+                    subtitle = cfg.kind.label,
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { moveSource(index, up = true) },
+                                enabled = index > 0,
+                            ) { Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up") }
+                            IconButton(
+                                onClick = { moveSource(index, up = false) },
+                                enabled = index < sources.lastIndex,
+                            ) { Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down") }
+                            Switch(
+                                checked = on,
+                                onCheckedChange = { SourceRegistry.setEnabled(cfg.id, it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        }
+                    },
+                )
+                if (index < sources.lastIndex) RowDivider()
+            }
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Extension,
+                title = "Extension store",
+                subtitle = "Browse and install SpotiFLAC extensions",
+                trailing = { Chevron() },
+                onClick = onExtensions,
             )
         }
 
@@ -769,6 +831,15 @@ fun SettingsScreen(
             },
         )
     }
+}
+
+/** Swap a source with its neighbour in the user's order and persist it. */
+private fun moveSource(from: Int, up: Boolean) {
+    val list = SourceRegistry.orderedConfigs().map { it.id }.toMutableList()
+    val to = if (up) from - 1 else from + 1
+    if (to < 0 || to >= list.size) return
+    list[from] = list[to].also { list[to] = list[from] }
+    AppSettings.setSourceOrder(list)
 }
 
 /** Which ceiling the open picker is editing. */

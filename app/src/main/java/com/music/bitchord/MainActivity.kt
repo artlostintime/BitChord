@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.music.bitchord.auth.DiscordLoginScreen
+import com.music.bitchord.auth.SpotifyLoginScreen
 import com.music.bitchord.auth.YtMusicLoginScreen
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.NerdStats
@@ -128,6 +129,8 @@ import com.music.bitchord.ui.screens.LocalMusicScreen
 import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.ui.screens.LibraryScreen
 import com.music.bitchord.ui.screens.SearchScreen
+import com.music.bitchord.ui.screens.SpotifyScreen
+import com.music.bitchord.ui.screens.ExtensionsScreen
 import com.music.bitchord.ui.theme.BitChordTheme
 import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.ui.theme.SystemBarIcons
@@ -142,6 +145,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // ponytail: pick the highest-Hz mode at the device's native resolution
+        // so 90/120/144Hz panels aren't capped at 60. Activity.display is API
+        // 30+; below that fall back to WindowManager.defaultDisplay (deprecated).
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            @Suppress("NewApi")
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
+        val currentMode = display?.mode
+        val bestMode = display?.supportedModes
+            ?.filter { it.physicalWidth == currentMode?.physicalWidth && it.physicalHeight == currentMode?.physicalHeight }
+            ?.maxByOrNull { it.refreshRate }
+        if (bestMode != null) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = bestMode.modeId }
+        }
+
         setContent {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val darkTheme = when (theme) {
@@ -177,6 +199,9 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
     var showDiscord by remember { mutableStateOf(false) }
     var showDiscordLogin by remember { mutableStateOf(false) }
     var discordDialog by remember { mutableStateOf<DiscordDialog?>(null) }
+    var showSpotify by remember { mutableStateOf(false) }
+    var showSpotifyLogin by remember { mutableStateOf(false) }
+    var showExtensions by remember { mutableStateOf(false) }
     var songActions by remember { mutableStateOf<Song?>(null) }
     // Whether the player's album/artist lookup (below, for the current track)
     // is still in flight — read by the long-press sheet so it can show a
@@ -383,7 +408,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
 
     val tabs = remember {
         listOf(
-            BottomTab("Play", BitChordIcons.Play),
+            BottomTab("Listen Now", BitChordIcons.Play),
             BottomTab("Explore", BitChordIcons.Explore),
             BottomTab("Library", BitChordIcons.Library),
             BottomTab("Search", BitChordIcons.Search),
@@ -592,6 +617,12 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
         BackHandler(enabled = showDiscord) {
             showDiscord = false
         }
+        BackHandler(enabled = showSpotify) {
+            showSpotify = false
+        }
+        BackHandler(enabled = showExtensions) {
+            showExtensions = false
+        }
         BackHandler(enabled = showAccountScrobbling && !showDiscord) {
             showAccountScrobbling = false
         }
@@ -613,6 +644,8 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
         AnimatedContent(
             targetState = when {
                 showDiscord -> "discord"
+                showSpotify -> "spotify"
+                showExtensions -> "extensions"
                 showAccountScrobbling -> "account_scrobbling"
                 showSettings -> "settings"
                 detail != null -> detail.browseId
@@ -634,6 +667,18 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onOpenDialog = { discordDialog = it },
                     contentPadding = listPadding,
                 )
+            } else if (key == "spotify") {
+                SpotifyScreen(
+                    spDc = viewModel.spotifySpDc,
+                    onOpenLogin = { showSpotifyLogin = true },
+                    onSignOut = { viewModel.spotifySignOut() },
+                    onPlay = play,
+                    contentPadding = listPadding,
+                )
+            } else if (key == "extensions") {
+                ExtensionsScreen(
+                    contentPadding = listPadding,
+                )
             } else if (key == "account_scrobbling") {
                 AccountAndScrobblingScreen(
                     signedIn = signedIn,
@@ -647,6 +692,8 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onOpenListenBrainzLogin = { showListenBrainzLogin = true },
                     onOpenLastfmLogin = { showLastfmLogin = true },
                     onOpenDiscord = { showDiscord = true },
+                    onOpenSpotify = { showSpotify = true },
+                    spotifySignedIn = viewModel.isSpotifySignedIn,
                     contentPadding = listPadding,
                 )
             } else if (key == "settings") {
@@ -660,6 +707,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                     onSignOut = { viewModel.signOut() },
                     onAccountScrobbling = { showAccountScrobbling = true },
                     onLyricsSources = { showLyricsSources = true },
+                    onExtensions = { showExtensions = true },
                     contentPadding = listPadding,
                 )
             } else if (page != null && page.browseId.startsWith("local:")) {
@@ -891,19 +939,18 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
         FrostedTopBar(
             title = when {
                 showDiscord -> "Discord"
+                showSpotify -> "Spotify"
                 showAccountScrobbling -> "Account & scrobbling"
                 showSettings -> "Settings"
                 detail != null -> detail.title
-                else -> tabs[selectedTab].let {
-                    if (it.label == "Play") "Listen Now" else it.label
-                }
+                else -> tabs[selectedTab].label
             },
             hazeState = hazeState,
             ownBackdrop = detail == null || isLocalDetail,
             // Search has no large in-list header to hand the title back to —
             // the field takes that space — so its bar title is always up.
             scrolled = when {
-                showSettings || showAccountScrobbling || showDiscord -> true
+                showSettings || showAccountScrobbling || showDiscord || showSpotify -> true
                 detail != null -> detailScrolled
                 else -> scrolled || selectedTab == TAB_SEARCH
             },
@@ -911,6 +958,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             pullFraction = { currentPull?.distanceFraction ?: 0f },
             onBack = when {
                 showDiscord -> ({ showDiscord = false })
+                showSpotify -> ({ showSpotify = false })
                 showAccountScrobbling -> ({ showAccountScrobbling = false })
                 showSettings -> ({ showSettings = false })
                 detail != null -> ({ viewModel.closeDetail(); Unit })
@@ -1479,6 +1527,41 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                         onTokenCaptured = { token ->
                             AppSettings.setDiscordToken(token)
                             showDiscordLogin = false
+                        },
+                    )
+                }
+            }
+        }
+
+        // ---- Spotify sign-in (full screen WebView) ----
+        if (showSpotifyLogin) {
+            BackHandler { showSpotifyLogin = false }
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { showSpotifyLogin = false }) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onBackground,
+                            )
+                        }
+                        Text(
+                            "Sign in to Spotify",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                        )
+                    }
+                    SpotifyLoginScreen(
+                        onCookieCaptured = { spDc ->
+                            viewModel.saveSpotifySpDc(spDc)
+                            showSpotifyLogin = false
                         },
                     )
                 }

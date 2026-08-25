@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -38,6 +39,8 @@ fun AccountAndScrobblingScreen(
     onOpenListenBrainzLogin: () -> Unit,
     onOpenLastfmLogin: () -> Unit,
     onOpenDiscord: () -> Unit,
+    onOpenSpotify: () -> Unit,
+    spotifySignedIn: Boolean,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -91,6 +94,18 @@ fun AccountAndScrobblingScreen(
                     else -> "Sharing your listens"
                 },
                 onClick = onOpenDiscord,
+            )
+        }
+
+        SettingsGroup(
+            header = "Spotify",
+            footer = "Import your liked songs as a YouTube Music queue.",
+        ) {
+            SettingsRow(
+                icon = Icons.Rounded.MusicNote,
+                title = "Spotify",
+                subtitle = if (spotifySignedIn) "Connected — liked songs ready" else "Tap to connect",
+                onClick = onOpenSpotify,
             )
         }
 

@@ -57,6 +57,21 @@ data class StreamFormat(
 data class SourceStream(
     val url: String,
     val format: StreamFormat = StreamFormat(),
+    /**
+     * The name of the source that produced this stream, when one did — a
+     * module's [MusicSource.displayName], carried so the stats panel can say
+     * where the audio came from without the resolver being asked again. Null
+     * for streams the app built itself (a YouTube URL, a local file), which is
+     * the honest answer: nobody "served" those.
+     */
+    val sourceLabel: String? = null,
+    /**
+     * The [TrackMatcher] confidence (0–~200) of the row that produced this
+     * stream, when it came from a search. Carried so [SourceResolver.score] can
+     * use match strength as a tiebreaker without re-matching. Null for streams
+     * built directly from a known id (a pinned source, a YouTube URL).
+     */
+    val confidence: Int? = null,
     val headers: Map<String, String> = emptyMap(),
     /**
      * Whether this is less than was asked for, taken because nothing better

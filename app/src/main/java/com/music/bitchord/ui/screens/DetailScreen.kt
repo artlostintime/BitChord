@@ -266,7 +266,7 @@ fun DetailScreen(
                             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(top.chunked(SONGS_PER_COLUMN)) { column ->
+                            items(top.chunked(SONGS_PER_COLUMN), key = { it.firstOrNull()?.videoId ?: it.size }) { column ->
                                 Column(Modifier.fillParentMaxWidth(0.88f)) {
                                     column.forEach { song ->
                                         CompactSongRow(
@@ -338,14 +338,14 @@ fun DetailScreen(
             }
 
             // Albums / Singles & EPs carousels (artist pages).
-            items(page.sections) { shelf ->
+            items(page.sections, key = { "section:${it.title}" }) { shelf ->
                 Column(Modifier.padding(top = 22.dp)) {
                     SectionHeading(shelf.title, palette)
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        items(shelf.items) { item ->
+                        items(shelf.items, key = { it.videoId ?: it.browseId ?: it.title }) { item ->
                             SectionCard(
                                 item = item,
                                 palette = palette,

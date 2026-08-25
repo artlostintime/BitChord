@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -318,7 +320,7 @@ private fun ArtistsTab(
                 title = "${artists.size} artists",
             )
         }
-        items(artists) { (artist, artistSongs) ->
+        items(artists, key = { it.key }) { (artist, artistSongs) ->
             ArtistRow(
                 name = artist,
                 songCount = artistSongs.size,
@@ -410,7 +412,7 @@ private fun AlbumsTab(
                 MessageState(message = "None of these tracks say what album they're from.")
             }
         }
-        items(albums) { (album, albumSongs) ->
+        items(albums, key = { it.key }) { (album, albumSongs) ->
             AlbumRow(
                 name = album,
                 artist = albumSongs.firstOrNull()?.artist ?: "",
@@ -539,54 +541,47 @@ private fun DrillDownSongList(
                     .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Play button
+                // Play button — glass pill, matching DetailScreen
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.primary)
+                        .height(50.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
                         .clickable { if (songs.isNotEmpty()) onSongClick(songs, 0) }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
                     Icon(
                         Icons.Rounded.PlayArrow,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Play",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
-                // Shuffle button
-                Row(
+                // Shuffle button — glass pill circle, matching DetailScreen
+                Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                        .clickable { if (songs.isNotEmpty()) onShuffle(songs) }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+                        .clickable { if (songs.isNotEmpty()) onShuffle(songs) },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Rounded.Shuffle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Shuffle",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        contentDescription = "Shuffle",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
             }

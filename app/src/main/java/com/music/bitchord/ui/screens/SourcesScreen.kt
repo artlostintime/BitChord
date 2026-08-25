@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -246,6 +247,8 @@ private fun SourceRow(
             imageVector = when (config.kind) {
                 SourceKind.MODULE -> Icons.Rounded.Extension
                 SourceKind.YOUTUBE -> Icons.Rounded.PlayCircle
+                SourceKind.LOCAL -> Icons.Rounded.Storage
+                SourceKind.EXTENSION -> Icons.Rounded.Extension
             },
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onBackground,

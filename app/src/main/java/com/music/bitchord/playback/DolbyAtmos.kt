@@ -228,8 +228,9 @@ object DolbyAtmos {
     private val DOLBY_PACKAGES = listOf(
         "com.dolby.dax2appui",
         "com.dolby.daxappui",
-        "com.dolby.dolby234",
         "com.atc.daxappUI",
+        // ponytail: com.dolby.dolby234 deliberately absent — that's "Dolby On",
+        // the recording app, not an Atmos panel; launching it was the bug.
     )
 
     private val VENDOR_KEYS = listOf(

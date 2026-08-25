@@ -7,6 +7,7 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.AudioQuality
 import kotlinx.coroutines.CancellationException
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Turns a queued track into an openable stream, using whichever source can
@@ -33,6 +34,21 @@ import kotlinx.coroutines.CancellationException
 object SourceResolver {
 
     private const val TAG = "BitChord"
+
+    /** Recent failure count per source configId — feeds [score]'s health term. */
+    private val health = ConcurrentHashMap<String, Int>()
+
+    /**
+     * Next-best candidates recorded at resolve time, keyed by track id. Consumed
+     * by [takeFallback] when the pick fails to open — see [markFailed].
+     */
+    private val fallbacks = ConcurrentHashMap<String, MutableList<SourceStream>>()
+
+    /**
+     * Track ids whose last playback open failed, so the next re-open may consume
+     * a recorded fallback instead of re-picking the same dead source.
+     */
+    private val failedKeys = ConcurrentHashMap<String, Boolean>()
 
     /**
      * What to ask a source for, right now.
@@ -95,36 +111,49 @@ object SourceResolver {
         val pinned = SourceRegistry.instance(configId)
         val active = SourceRegistry.active()
 
-        // The upgrade path: with lossless asked for and the pinned source
-        // unable to serve it, anything ranked above it that can is worth
-        // asking first. This is the whole reason the list is ordered — it is
-        // what makes "my own FLAC of this, if I have one, else stream it"
-        // expressible.
-        if (request is StreamRequest.Lossless && pinned?.kind?.canServeLossless != true) {
-            for (source in rankedAbove(configId, active)) {
-                if (!source.kind.canServeLossless) continue
-                val upgraded = matchAndStream(source, target, request) ?: continue
-                TrackLog.d(TAG, "lossless upgrade: '${target.title}' served by ${source.displayName}")
-                return upgraded
-            }
-        }
-
+        // Every source that could serve this track becomes a candidate, then the
+        // best-scoring one wins — see [score]. The pinned source is streamed by
+        // its known id (an exact match) rather than searched, and is given a
+        // sticky bonus so a track plays from where it was queued unless something
+        // clearly better — a lossless copy when one was asked for — is available.
+        //
+        // Candidates are bounded to the pinned source, everything ranked above it,
+        // and YouTube as the universal fallback — see [rankedAbove]. Lower-ranked
+        // modules are deliberately excluded: they cannot outrank the pinned on
+        // preference, and YouTube already covers "something plays". ponytail: a
+        // lower-ranked module that uniquely holds a track is no longer a last
+        // resort here; add it back to [contenders] if that gap bites.
+        val contenders = (rankedAbove(configId, active) + listOfNotNull(pinned))
+            .distinctBy { it.configId }.toMutableList()
+        active.firstOrNull { it.kind == SourceKind.YOUTUBE }
+            ?.takeIf { yt -> contenders.none { it.configId == yt.configId } }
+            ?.let(contenders::add)
+        val candidates = mutableListOf<Pair<MusicSource, SourceStream>>()
         if (pinned != null) {
-            attempt(pinned) { pinned.stream(trackId, request) }?.let { return it }
-        }
-
-        // Last resort. A track whose own source is down is still a track the
-        // user asked for, and another source having it is not unlikely — this
-        // is the difference between a dead server skipping the queue forward
-        // and a dead server being invisible.
-        for (source in active) {
-            if (source.configId == configId) continue
-            matchAndStream(source, target, request)?.let {
-                TrackLog.d(TAG, "fallback: '${target.title}' served by ${source.displayName}")
-                return it
+            attempt(pinned) { pinned.stream(trackId, request) }?.let {
+                candidates.add(pinned to it.copy(sourceLabel = pinned.displayName, confidence = PINNED_CONFIDENCE))
             }
         }
-        return null
+        for (source in contenders) {
+            if (source.configId == configId) continue
+            matchAndStream(source, target, request)?.let { candidates.add(source to it) }
+        }
+        if (candidates.isEmpty()) return null
+        val ranked = candidates.map { (src, stream) ->
+            val rankIndex = active.indexOfFirst { it.configId == src.configId }
+                .let { if (it < 0) active.size else it }
+            val base = score(src, stream, target, request, rankIndex, active.size)
+            // The pinned source keeps a sticky edge so it isn't displaced by a
+            // marginally higher-ranked one — only by a genuinely better pick.
+            val withPin = if (src.configId == pinned?.configId) base + PINNED_BONUS else base
+            stream to withPin
+        }.sortedByDescending { it.second }.map { it.first }
+        val best = ranked.first()
+        // The rest are the automatic fallback chain if [best] fails to open — see
+        // [takeFallback] and [markFailed].
+        rememberFallbacks(trackId, ranked.drop(1))
+        TrackLog.d(TAG, "resolved '${target.title}' → ${best.sourceLabel} (${ranked.size} candidate(s))")
+        return best
     }
 
     /**
@@ -148,20 +177,20 @@ object SourceResolver {
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val request = requestForNow()
-        for (source in rankedAbove(youtube.configId, active)) {
-            val stream = matchAndStream(source, target, request) ?: continue
-            // Says what was found, not what the caller will do with it. This
-            // line used to read "substituted" unconditionally, including for
-            // streams the caller went on to refuse — which made a log of a
-            // track that played on YouTube look like a track that hadn't.
-            TrackLog.d(
-                TAG,
-                "substituted: '${target.title}' served by ${source.displayName} over YouTube" +
-                    " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
-            )
-            return stream
-        }
-        return null
+        // Score every source ranked above YouTube and take the best, rather than
+        // the first that happens to match — see [score].
+        val ranked = rankedCandidates(target, request, rankedAbove(youtube.configId, active))
+        val best = ranked.firstOrNull() ?: return null
+        // Says what was found, not what the caller will do with it. This line
+        // used to read "substituted" unconditionally, including for streams the
+        // caller went on to refuse — which made a log of a track that played on
+        // YouTube look like a track that hadn't.
+        TrackLog.d(
+            TAG,
+            "substituted: '${target.title}' served by ${best.sourceLabel} over YouTube" +
+                " at ${best.format.summary}" + if (best.belowRequest) " (below request)" else "",
+        )
+        return best
     }
 
     /**
@@ -191,6 +220,41 @@ object SourceResolver {
      *   unknown, and an unknown floor is treated as one nothing lossy clears:
      *   a swap that might be a downgrade is worse than no swap at all.
      */
+    /**
+     * Records [list] as the automatic fallback chain for [key] (a track id), to
+     * be consumed by [takeFallback] if the pick fails to open — see [markFailed].
+     */
+    fun rememberFallbacks(key: String, list: List<SourceStream>) {
+        if (list.isNotEmpty()) fallbacks[key] = list.toMutableList()
+    }
+
+    /**
+     * Marks [key] as having failed to open, so its next re-open may consume the
+     * next recorded fallback instead of re-picking the same dead source. Set from
+     * [com.music.bitchord.playback.PlaybackService.recoverFrom]; cleared when the
+     * fallback is taken.
+     */
+    fun markFailed(key: String) {
+        failedKeys[key] = true
+    }
+
+    /**
+     * The next fallback stream for [key], or null when none is owed — either
+     * nothing was recorded, or this re-open isn't a retry after a failure.
+     * Consuming it clears the failure flag so a normal re-open — a seek or a
+     * buffer refill — doesn't drift onto a different source.
+     */
+    fun takeFallback(key: String): SourceStream? {
+        if (failedKeys[key] != true) return null
+        failedKeys.remove(key)
+        val queue = fallbacks[key] ?: return null
+        if (queue.isEmpty()) {
+            fallbacks.remove(key)
+            return null
+        }
+        return queue.removeAt(0)
+    }
+
     suspend fun upgradeFor(
         target: TrackMatcher.Target,
         playing: StreamFormat? = null,
@@ -309,6 +373,86 @@ object SourceResolver {
         val gain = (candidate.kbps ?: return false) - (playing?.kbps ?: return false)
         return gain >= UPGRADE_MIN_GAIN_KBPS
     }
+
+    /**
+     * How good a pick [stream] from [source] is, for [target] under [request].
+     *
+     * Four things, in descending weight:
+     *  - **User source order** — a source ranked higher in [SourceRegistry.active]
+     *    scores higher. This is the user's stated preference, and it dominates
+     *    bitrate differences within a quality tier.
+     *  - **Audio quality** — a lossless codec dominates unless lossless wasn't
+     *    asked for (then codec/bitrate decide), so a FLAC still wins when the
+     *    user turned lossless on, but a higher-ranked lossy source can win when
+     *    they didn't.
+     *  - **Match confidence** — [TrackMatcher]'s score on the row that produced
+     *    the stream, a minor tiebreaker.
+     *  - **Availability/health** — recent failures for the source are penalised.
+     *
+     * ponytail: a linear weighted sum, not a trained ranker. Weights are
+     * heuristic; tune the `*_WEIGHT` constants if the ordering surprises.
+     */
+    private fun score(
+        source: MusicSource,
+        stream: SourceStream,
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+        rankIndex: Int,
+        activeSize: Int,
+    ): Int {
+        val preference = (activeSize - rankIndex) * PREF_WEIGHT
+        val quality = qualityTier(stream, request)
+        val confidence = stream.confidence ?: 0
+        val healthPenalty = (health[source.configId] ?: 0) * HEALTH_WEIGHT
+        return preference + quality + confidence - healthPenalty
+    }
+
+    /** Quality points for [stream] under [request] — see [score]. */
+    private fun qualityTier(stream: SourceStream, request: StreamRequest): Int {
+        val lossless = stream.format.isLossless == true
+        val bonus = if (lossless) {
+            if (request is StreamRequest.Lossless) LOSSLESS_BONUS else LOSSLESS_PLAIN_BONUS
+        } else 0
+        return bonus + (stream.format.kbps ?: 0) / 100
+    }
+
+    /**
+     * All streams [sources] can serve for [target] under [request], scored and
+     * returned best-first. A source that throws or finds nothing contributes
+     * nothing; one that answers is recorded as healthy — see [score] and [health].
+     *
+     * @param requireLossless drops any candidate that isn't bit-exact, for the
+     *   upgrade paths that have no use for a lossy stand-in.
+     */
+    private suspend fun rankedCandidates(
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+        sources: List<MusicSource>,
+        requireLossless: Boolean = false,
+    ): List<SourceStream> {
+        val active = SourceRegistry.active()
+        val scored = mutableListOf<Pair<SourceStream, Int>>()
+        for (source in sources) {
+            val stream = matchAndStream(
+                source, target, request,
+                waitForAll = requireLossless, strictLength = requireLossless,
+            ) ?: continue
+            // A source that actually produced a stream has shown it is reachable.
+            health[source.configId] = 0
+            if (requireLossless && stream.format.isLossless != true) continue
+            val rankIndex = active.indexOfFirst { it.configId == source.configId }
+                .let { if (it < 0) active.size else it }
+            scored.add(stream to score(source, stream, target, request, rankIndex, active.size))
+        }
+        return scored.sortedByDescending { it.second }.map { it.first }
+    }
+
+    private const val PREF_WEIGHT = 10_000
+    private const val LOSSLESS_BONUS = 1_000_000
+    private const val LOSSLESS_PLAIN_BONUS = 500
+    private const val HEALTH_WEIGHT = 5_000
+    private const val PINNED_CONFIDENCE = 200
+    private const val PINNED_BONUS = 50_000
 
     /**
      * Whether two runtimes are close enough to be the same recording, for a
@@ -472,7 +616,17 @@ object SourceResolver {
             // The row this URL came from knows how long the recording is; the
             // URL itself doesn't. Carried along so a caller swapping this into
             // a track already playing can check it — see [SourceStream.durationSec].
-            val stream = opened.copy(durationSec = TrackMatcher.secondsOf(match.durationText))
+            // [SourceStream.sourceLabel] rides along for the same reason: every
+            // stream this method returns was produced by [source], so naming it
+            // here means the stats panel can report the serving source without
+            // any caller having to thread it through — see [NerdStats.sourceLabel].
+            val stream = opened.copy(
+                durationSec = TrackMatcher.secondsOf(match.durationText),
+                sourceLabel = source.displayName,
+                // Match confidence rides along so [score] can use it as a
+                // tiebreaker without re-matching — see [NerdStats] and FR-4.
+                confidence = TrackMatcher.score(match, target),
+            )
             val served = stream.format
             if (!wantsLossless || served.isLossless == true || served.statesNothingLossy) {
                 TrackLog.d(
@@ -530,6 +684,9 @@ object SourceResolver {
         throw e
     } catch (e: Exception) {
         TrackLog.w(TAG, "${source.displayName} failed: ${e.javaClass.simpleName}: ${e.message}")
+        // Availability/health signal for [score]: a source that just threw is
+        // less likely to be the best pick next time.
+        health[source.configId] = (health[source.configId] ?: 0) + 1
         null
     }
 
