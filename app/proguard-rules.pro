@@ -36,26 +36,10 @@
 
 # -----------------------------------------------------------------------------
 # kotlinx.serialization 1.7.x
-# Official rules: keep Companion.serializer() and the generated **$$serializer
-# classes. Plus an explicit keep for any hand-written KSerializer (e.g. the
-# OpCodeSerializer used by @Serializable(OpCodeSerializer::class)).
+# Essential keeps: plugin-generated serializers and hand-written KSerializer
+# implementations. (Companion-field keeps omitted — they were malformed R8
+# syntax and are only a reflection-lookup optimization.)
 # -----------------------------------------------------------------------------
-# Keep `Companion` object fields of serializable classes (avoids getDeclaredClasses lookup).
--if @kotlinx.serialization.Serializable class ** {
-    static ** Companion;
-}
--keepclassmembers class <1> {
-    static <1> Companion Companion;
-}
-
-# Keep `serializer()` on companion objects (default and named) of serializable classes.
--if @kotlinx.serialization.Serializable class ** {
-    static ** Companion;
-}
--keepclassmembers class <1> {
-    static ** serializer(...);
-}
-
 # Keep the plugin-generated serializer classes.
 -keep class **$$serializer {
     *;
