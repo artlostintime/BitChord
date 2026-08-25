@@ -2,6 +2,7 @@ package com.music.bitchord.data.extensions
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
 import com.dokar.quickjs.QuickJs
 import com.dokar.quickjs.binding.AsyncFunctionBinding
 import com.dokar.quickjs.binding.FunctionBinding
@@ -131,12 +132,106 @@ class ExtensionSource(
                 return@withContext null
             }
             if (url.isBlank()) return@withContext null
+            // Tidal-style extensions return a DASH/BTS manifest (base64 MPD or
+            // JSON {urls:[...]}), not a playable URL. Rewrite it to a local
+            // DASH playlist ExoPlayer can open — see [resolveManifest].
+            val playable = resolveManifest(url, trackId)
             SourceStream(
-                url = url,
-                format = StreamFormat(codec = codecOf(url)),
+                url = playable,
+                format = StreamFormat(codec = if (playable.startsWith("file://")) "flac" else codecOf(playable)),
                 sourceLabel = displayName,
             )
         }
+
+    /**
+     * Tidal (and kin) don't hand back a playable URL from `download()` — they
+     * return a DASH/BTS manifest describing an init segment plus FLAC media
+     * segments. ExoPlayer can't open a raw segment list, so we materialise a
+     * local DASH manifest (.mpd) in [Context.cacheDir] and return a `file://`
+     * URI. Media3's DefaultMediaSourceFactory parses DASH from a file URI
+     * (media3-exoplayer-dash, added for this).
+     *
+     * ponytail: segments are not pre-joined; playback relies on the CDN URLs
+     * named in the manifest staying valid for the session. Re-resolve if a
+     * segment 403s — there is no manifest refresh here.
+     */
+    private fun resolveManifest(raw: String, trackId: String): String {
+        val trimmed = raw.trim()
+        // JSON manifest: {"urls":[...]}, optionally {"init":..., "urls":[...]}.
+        if (trimmed.startsWith("{")) {
+            return runCatching {
+                val obj = JSONObject(trimmed)
+                val urls = obj.optJSONArray("urls")
+                if (urls != null && urls.length() > 0) {
+                    if (urls.length() == 1) {
+                        urls.getString(0) // single direct chunk URL
+                    } else {
+                        val init = obj.optString("init").takeIf { it.isNotBlank() }
+                        val media = (0 until urls.length()).map { i -> urls.getString(i) }
+                        writeDashPlaylist(trackId, init, media)
+                    }
+                } else {
+                    raw // not a shape we recognise; pass through unchanged
+                }
+            }.getOrDefault(raw)
+        }
+        // base64 MPD: starts with PD94 (base64 of "<?xm") or decodes to "<MPD".
+        if (looksLikeBase64Mpd(trimmed)) {
+            val decoded = decodeBase64(trimmed) ?: return raw
+            if (decoded.contains("<MPD", ignoreCase = true) ||
+                decoded.trimStart().startsWith("<?xml", ignoreCase = true)
+            ) {
+                return writeCacheFile(trackId, "mpd", decoded)
+            }
+        }
+        return raw
+    }
+
+    /** Builds a DASH MPD with a SegmentList (init + media) and writes it to cache. */
+    private fun writeDashPlaylist(trackId: String, init: String?, media: List<String>): String {
+        val segList = buildString {
+            append("        <SegmentList>\n")
+            if (init != null) append("          <Initialization sourceURL=\"${init.xmlEscape()}\"/>\n")
+            for (m in media) append("          <SegmentURL media=\"${m.xmlEscape()}\"/>\n")
+            append("        </SegmentList>\n")
+        }
+        val mpd = """<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT0H0M0S" minBufferTime="PT1S" profiles="urn:mpeg:dash:profile:full:2011">
+  <Period>
+    <AdaptationSet id="0" mimeType="audio/flac" subsegmentAlignment="true">
+      <Representation id="0" codecs="flac" mimeType="audio/flac" bandwidth="1000000">
+$segList      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>"""
+        return writeCacheFile(trackId, "mpd", mpd)
+    }
+
+    private fun writeCacheFile(trackId: String, ext: String, content: String): String {
+        val safeId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val file = File(context.cacheDir, "tidal_$safeId.$ext")
+        file.writeText(content)
+        return "file://${file.absolutePath}"
+    }
+
+    private fun looksLikeBase64Mpd(s: String): Boolean {
+        if (s.startsWith("PD94")) return true // base64 of "<?xm"
+        if (!s.matches(Regex("^[A-Za-z0-9+/_-]+={0,2}$"))) return false
+        return decodeBase64(s)?.contains("<MPD", ignoreCase = true) == true
+    }
+
+    private fun decodeBase64(s: String): String? {
+        val clean = s.replace(Regex("\\s+"), "")
+        return runCatching { String(Base64.decode(clean, Base64.DEFAULT)) }
+            .getOrElse {
+                runCatching { String(Base64.decode(clean, Base64.URL_SAFE)) }.getOrNull()
+            }
+    }
+
+    private fun String.xmlEscape(): String = replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
 
     /** Best-effort tier from the row's free-text quality/format, like ModuleSource. */
     private fun qualityTier(t: ExtensionTrack): String? {
@@ -470,9 +565,13 @@ internal object ExtensionJs {
             t.startsWith("\"") && t.endsWith("\"") && t.length >= 2 ->
                 t.substring(1, t.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
             t.startsWith("{") ->
-                runCatching { JSONObject(t).optString("url", "") }.getOrDefault("")
-                    .takeIf { it.isNotBlank() }
-                    ?: throw IllegalStateException("extension download returned an object without a url")
+                // A well-behaved extension returns {"url": "..."}. A manifest
+                // response (Tidal: {"urls": [...]}) has no "url" field; pass it
+                // through so the caller can rewrite it into a playable source.
+                runCatching {
+                    val u = JSONObject(t).optString("url", "")
+                    if (u.isNotBlank()) u else t
+                }.getOrDefault(t)
             else -> t
         }
     }
