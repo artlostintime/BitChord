@@ -1,12 +1,17 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
@@ -14,6 +19,8 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.HapticFeedbackType
+import androidx.compose.material3.LocalHapticFeedback
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -21,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
@@ -28,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.R
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.RecommendationSource
 import kotlin.math.roundToInt
 
 @Composable
@@ -107,6 +117,34 @@ fun AccountAndScrobblingScreen(
                 subtitle = if (spotifySignedIn) "Connected — liked songs ready" else "Tap to connect",
                 onClick = onOpenSpotify,
             )
+        }
+
+        SettingsGroup(
+            header = "Recommendations",
+            footer = "Which service's home feed to show. Sign in to both to " +
+                "switch anytime — login and recommendation source are separate.",
+        ) {
+            val source by AppSettings.recommendationSource.collectAsStateWithLifecycle()
+            val googleOn = signedIn
+            val spotifyOn = spotifySignedIn
+            Column(Modifier.padding(horizontal = ROW_INSET, vertical = 12.dp)) {
+                Text(
+                    text = "Recommendations from",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Spacer(Modifier.height(10.dp))
+                SegmentedControl(
+                    options = listOf("Google", "Spotify"),
+                    selectedIndex = if (source == RecommendationSource.SPOTIFY) 1 else 0,
+                    enabledOptions = listOf(googleOn, spotifyOn),
+                    onSelect = { index ->
+                        AppSettings.setRecommendationSource(
+                            if (index == 1) RecommendationSource.SPOTIFY else RecommendationSource.GOOGLE,
+                        )
+                    },
+                )
+            }
         }
 
         if (AppSettings.scrobblingAvailable) {
@@ -258,5 +296,74 @@ fun AccountAndScrobblingScreen(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Sliding pill selector, mirroring the one in [SettingsSheet] but with a
+ * per-option [enabledOptions] gate so a service the user hasn't signed into
+ * can't be chosen as the recommendation source.
+ */
+@Composable
+private fun SegmentedControl(
+    options: List<String>,
+    selectedIndex: Int,
+    enabledOptions: List<Boolean> = List(options.size) { true },
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.outline)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEachIndexed { index, label ->
+            val chosen = index == selectedIndex
+            val enabled = enabledOptions.getOrElse(index) { true }
+            val pill by animateColorAsState(
+                targetValue = if (chosen) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.Transparent
+                },
+                animationSpec = tween(160),
+                label = "segmentPill",
+            )
+            val labelColor by animateColorAsState(
+                targetValue = if (chosen) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                animationSpec = tween(160),
+                label = "segmentLabel",
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(pill)
+                    .then(if (enabled) Modifier.clickable {
+                        if (!chosen) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(index)
+                        }
+                    } else Modifier)
+                    .alpha(if (enabled) 1f else 0.4f)
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = labelColor,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }

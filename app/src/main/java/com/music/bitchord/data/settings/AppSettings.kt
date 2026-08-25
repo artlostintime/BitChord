@@ -32,6 +32,18 @@ enum class ThemeMode(val label: String) {
 }
 
 /**
+ * Which service's recommendation algorithm feeds the Home tab.
+ *
+ * Login method and recommendation source are independent: a user may be
+ * signed into either, both, or neither, and switch the feed source at any
+ * time without re-authenticating. Defaults to Google — the legacy behaviour,
+ * where the YT home was always shown unless Spotify happened to be signed in.
+ */
+enum class RecommendationSource(val label: String) {
+    GOOGLE("Google"), SPOTIFY("Spotify")
+}
+
+/**
  * App settings, backed by SharedPreferences and exposed as flows.
  *
  * PlaybackService runs in the same process as the UI, so it observes these
@@ -172,6 +184,16 @@ object AppSettings {
      * so provider priority in FR-2 is just this order read back.
      */
     val sourceOrder = MutableStateFlow<List<String>>(emptyList())
+
+    /**
+     * Which service's recommendation algorithm drives the Home tab feed.
+     *
+     * Independent of sign-in state: the chosen source is used when it is
+     * available, otherwise the Home tab falls back to the other signed-in
+     * service, then to the chosen source's own loading/error state. See the
+     * selection logic in [com.music.bitchord.MainActivity].
+     */
+    val recommendationSource = MutableStateFlow(RecommendationSource.GOOGLE)
 
     // ── Scrobbling ──────────────────────────────────────────────────────
 
@@ -318,6 +340,9 @@ object AppSettings {
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
             lyricsSources.value = readLyricsSources()
         sourceOrder.value = readSourceOrder()
+        recommendationSource.value = runCatching {
+            RecommendationSource.valueOf(prefs.getString(KEY_RECOMMENDATION_SOURCE, null) ?: "GOOGLE")
+        }.getOrDefault(RecommendationSource.GOOGLE)
         extensionRepoUrls.value = readExtensionRepoUrls()
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
@@ -515,6 +540,12 @@ object AppSettings {
     fun setSourceOrder(value: List<String>) {
         sourceOrder.value = value
         prefs.edit().putString(KEY_SOURCE_ORDER, value.joinToString(",")).apply()
+    }
+
+    /** Writes through to prefs as a name string; an unknown stored value falls back to Google. */
+    fun setRecommendationSource(value: RecommendationSource) {
+        recommendationSource.value = value
+        prefs.edit().putString(KEY_RECOMMENDATION_SOURCE, value.name).apply()
     }
 
     /**
@@ -737,6 +768,7 @@ object AppSettings {
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_SOURCE_ORDER = "source_order"
+    private const val KEY_RECOMMENDATION_SOURCE = "recommendation_source"
     private const val KEY_EXTENSION_REPO_URLS = "extension_repo_urls"
 
     private const val KEY_LASTFM_ENABLED = "lastfm_enabled"

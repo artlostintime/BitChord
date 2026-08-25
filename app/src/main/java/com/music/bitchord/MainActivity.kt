@@ -87,6 +87,7 @@ import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.UserPlaylist
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.RecommendationSource
 import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.TrackMatcher
@@ -789,10 +790,19 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
             } else when (selectedTab) {
                 TAB_HOME -> {
                     val spotifyHome = spotifyHomeState
-                    val useSpotifyHome = viewModel.spotifySpDc != null &&
+                    val ytHome = homeState
+                    val spotifyReady = viewModel.spotifySpDc != null &&
                         spotifyHome is UiState.Success &&
                         spotifyHome.data.isNotEmpty()
-                    val effectiveHomeState = if (useSpotifyHome) spotifyHome else homeState
+                    val ytReady = signedIn &&
+                        ytHome is UiState.Success &&
+                        ytHome.data.isNotEmpty()
+                    // The chosen recommendation source wins; if it isn't
+                    // available, fall back to the other signed-in service, then
+                    // to the chosen source's own loading/error state.
+                    val wantSpotify = AppSettings.recommendationSource.value == RecommendationSource.SPOTIFY
+                    val useSpotifyHome = if (wantSpotify) spotifyReady || !ytReady else !ytReady && spotifyReady
+                    val effectiveHomeState = if (useSpotifyHome) spotifyHome else ytHome
                     HomeScreen(
                         state = effectiveHomeState,
                         listState = homeListState,
