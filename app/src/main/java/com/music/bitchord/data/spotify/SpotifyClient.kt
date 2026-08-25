@@ -15,6 +15,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import com.music.bitchord.data.TrackLog
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -41,7 +44,13 @@ object SpotifyClient {
         val imageUrl: String?,
     )
 
-    private val json = Json { ignoreUnknownKeys = true }
+    // Tolerant parsing: Spotify's GQL schema drifts; lenient + coerce keeps us
+    // from choking on a field we don't model (mirrors Meld's Json config).
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
 
     private const val GQL_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
     /** GraphQL hard-caps persisted-query pages at 100; larger values error out. */
@@ -49,14 +58,19 @@ object SpotifyClient {
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-    // Persisted-query hashes (from Meld; Spotify rotates these — if requests start
-    // failing with PersistedQueryNotFound, refresh from Meld's remote registry:
-    // https://francescograzioso.github.io/Meld/spotify-gql-hashes.json)
+    // Persisted-query hashes ported from Meld's SpotifyHashProvider (known-good,
+    // sourced from the sonic-liberation/hetu_spotify_gql_client registry). Spotify
+    // rotates these — if requests start failing with PersistedQueryNotFound,
+    // refresh from Meld's remote registry:
+    // https://francescograzioso.github.io/Meld/spotify-gql-hashes.json
     private val HASHES = mapOf(
         "searchDesktop" to "4801118d4a100f756e833d33984436a3899cff359c532f8fd3aaf174b60b3b49",
         "fetchPlaylist" to "346811f856fb0b7e4f6c59f8ebea78dd081c6e2fb01b77c954b26259d5fc6763",
         "fetchLibraryTracks" to "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
-        "libraryV3" to "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455",
+        // Replaced the previous runtime-unverified hash (390c78e5…) with Meld's
+        // verified libraryV3 hash — the old one was the root cause of the empty
+        // "No playlists found" result.
+        "libraryV3" to "973e511ca44261fda7eebac8b653155e7caee3675abb4fb110cc1b8c78b091c3",
     )
 
     @Volatile
@@ -107,15 +121,32 @@ object SpotifyClient {
                 .header("Authorization", "Bearer ${accessToken(spDc)}")
                 .header("User-Agent", USER_AGENT)
                 .header("app-platform", "WebPlayer")
+                .header("Origin", "https://open.spotify.com")
+                .header("Referer", "https://open.spotify.com/")
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             Http.client.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    TrackLog.w("SpotifyClient", "gql $operation HTTP ${response.code}: ${text.take(500)}")
                     throw SpotifyAuth.SpotifyException(response.code, "$operation HTTP ${response.code}: $text")
                 }
-                json.parseToJsonElement(text).jsonObject["data"]!!.jsonObject
+                val root = json.parseToJsonElement(text).jsonObject
+                root["errors"]?.takeIf { it !is JsonNull }?.jsonArray?.let { errs ->
+                    if (errs.isNotEmpty()) {
+                        TrackLog.w("SpotifyClient", "gql $operation errors: ${errs.toString().take(400)}")
+                    }
+                }
+                val data = root["data"]
+                if (data == null || data is JsonNull) {
+                    // PersistedQueryNotFound / auth errors arrive as HTTP 200 with
+                    // data:null — surface the raw body so the failure is diagnosable.
+                    TrackLog.w("SpotifyClient", "gql $operation: no data in response: ${text.take(500)}")
+                    throw SpotifyAuth.SpotifyException(412, "$operation: no data in GQL response (hash may be stale): $text")
+                }
+                data.jsonObject
             }
         }
 
@@ -159,21 +190,39 @@ object SpotifyClient {
     }
 
     private fun parsePlaylistTracks(data: JsonObject): List<SpotifyTrack> {
-        val items = data.jsonObject["playlist"]?.jsonObject?.get("content")?.jsonObject
-            ?.get("items")?.jsonArray ?: return emptyList()
+        // Meld uses `playlistV2` (not `playlist`); tolerate either key.
+        val root = data["playlistV2"]?.takeIf { it !is JsonNull }?.jsonObject
+            ?: data["playlist"]?.takeIf { it !is JsonNull }?.jsonObject
+        val items = root?.get("content")?.takeIf { it !is JsonNull }?.jsonObject
+            ?.get("items")?.takeIf { it !is JsonNull }?.jsonArray ?: return emptyList()
         return items.mapNotNull { item ->
-            val track = item.jsonObject["itemV2"]?.jsonObject?.get("data")?.jsonObject
+            val wrapper = item.jsonObject["itemV2"]?.takeIf { it !is JsonNull }?.jsonObject
                 ?: return@mapNotNull null
-            if (track["__typename"]?.jsonPrimitive?.content != "Track") return@mapNotNull null
-            val artists = track["artists"]?.jsonObject?.get("items")?.jsonArray
-                ?.joinToString(", ") { it.jsonObject["profile"]!!.jsonObject["name"]!!.jsonPrimitive.content }
+            // Meld: `itemV2.data` holds the track; fall back to the wrapper itself.
+            val track = wrapper["data"]?.takeIf { it !is JsonNull }?.jsonObject ?: wrapper
+            if (track["__typename"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content != "Track") {
+                return@mapNotNull null
+            }
+            val artists = track["artists"]?.takeIf { it !is JsonNull }?.jsonObject
+                ?.get("items")?.takeIf { it !is JsonNull }?.jsonArray
+                ?.joinToString(", ") {
+                    it.jsonObject["profile"]?.takeIf { p -> p !is JsonNull }?.jsonObject
+                        ?.get("name")?.takeIf { n -> n !is JsonNull }?.jsonPrimitive?.content ?: ""
+                }
                 .orEmpty()
+            // URI lives on the wrapper (`_uri`/`uri`) in Meld; fall back to data.uri.
+            val uri = wrapper["_uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: wrapper["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: track["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: return@mapNotNull null
             SpotifyTrack(
-                id = track["uri"]?.jsonPrimitive?.content?.removePrefix("spotify:track:") ?: return@mapNotNull null,
-                title = track["name"]?.jsonPrimitive?.content.orEmpty(),
+                id = uri.removePrefix("spotify:track:"),
+                title = track["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content.orEmpty(),
                 artist = artists,
-                albumName = track["albumOfTrack"]?.jsonObject?.get("name")?.jsonPrimitive?.content,
-                durationMs = track["duration"]?.jsonObject?.get("totalMilliseconds")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                albumName = track["albumOfTrack"]?.takeIf { it !is JsonNull }?.jsonObject
+                    ?.get("name")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
+                durationMs = track["duration"]?.takeIf { it !is JsonNull }?.jsonObject
+                    ?.get("totalMilliseconds")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
             )
         }
     }
@@ -236,19 +285,36 @@ object SpotifyClient {
     }
 
     private fun parseLikedPage(data: JsonObject): List<SpotifyTrack> {
-        val items = data.jsonObject["me"]?.jsonObject?.get("library")?.jsonObject
-            ?.get("tracks")?.jsonObject?.get("items")?.jsonArray ?: return emptyList()
+        val items = data["me"]?.takeIf { it !is JsonNull }?.jsonObject
+            ?.get("library")?.takeIf { it !is JsonNull }?.jsonObject
+            ?.get("tracks")?.takeIf { it !is JsonNull }?.jsonObject
+            ?.get("items")?.takeIf { it !is JsonNull }?.jsonArray ?: return emptyList()
         return items.mapNotNull { item ->
-            val track = item.jsonObject["track"]?.jsonObject ?: return@mapNotNull null
-            val artists = track["artists"]?.jsonObject?.get("items")?.jsonArray
-                ?.joinToString(", ") { it.jsonObject["profile"]!!.jsonObject["name"]!!.jsonPrimitive.content }
+            val wrapper = item.jsonObject["track"]?.takeIf { it !is JsonNull }?.jsonObject
+                ?: return@mapNotNull null
+            // Meld: `track` is a wrapper whose `data` holds the actual track object.
+            // Fall back to the wrapper itself if Spotify returns it unwrapped.
+            val track = wrapper["data"]?.takeIf { it !is JsonNull }?.jsonObject ?: wrapper
+            val artists = track["artists"]?.takeIf { it !is JsonNull }?.jsonObject
+                ?.get("items")?.takeIf { it !is JsonNull }?.jsonArray
+                ?.joinToString(", ") {
+                    it.jsonObject["profile"]?.takeIf { p -> p !is JsonNull }?.jsonObject
+                        ?.get("name")?.takeIf { n -> n !is JsonNull }?.jsonPrimitive?.content ?: ""
+                }
                 .orEmpty()
+            // URI lives on the wrapper (`_uri`/`uri`) in Meld; fall back to data.uri.
+            val uri = wrapper["_uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: wrapper["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: track["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: return@mapNotNull null
             SpotifyTrack(
-                id = track["uri"]?.jsonPrimitive?.content?.removePrefix("spotify:track:") ?: return@mapNotNull null,
-                title = track["name"]?.jsonPrimitive?.content.orEmpty(),
+                id = uri.removePrefix("spotify:track:"),
+                title = track["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content.orEmpty(),
                 artist = artists,
-                albumName = track["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content,
-                durationMs = track["duration"]?.jsonObject?.get("totalMilliseconds")?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                albumName = track["album"]?.takeIf { it !is JsonNull }?.jsonObject
+                    ?.get("name")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
+                durationMs = track["duration"]?.takeIf { it !is JsonNull }?.jsonObject
+                    ?.get("totalMilliseconds")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
             )
         }
     }
@@ -265,11 +331,22 @@ object SpotifyClient {
             val data = gql(
                 spDc, "libraryV3",
                 buildJsonObject {
+                    // Variables mirror Meld's working myPlaylists request.
                     put("filters", buildJsonArray { add(JsonPrimitive("Playlists")) })
-                    put("order", "DEFAULT")
+                    put("order", null as String?)
                     put("textFilter", "")
-                    put("offset", offset)
+                    put("features", buildJsonArray {
+                        add(JsonPrimitive("LIKED_SONGS"))
+                        add(JsonPrimitive("YOUR_EPISODES_V2"))
+                        add(JsonPrimitive("PRERELEASES"))
+                        add(JsonPrimitive("EVENTS"))
+                    })
                     put("limit", PAGE_LIMIT)
+                    put("offset", offset)
+                    put("flatten", true)
+                    put("expandedFolders", buildJsonArray {})
+                    put("folderUri", null as String?)
+                    put("includeFoldersWhenFlattening", false)
                 },
             )
             val page = parsePlaylists(data)
@@ -281,24 +358,69 @@ object SpotifyClient {
     }
 
     private fun parsePlaylists(data: JsonObject): List<SpotifyPlaylist> {
-        // ponytail: libraryV3 response shape derived from the public Web Player
-        // schema (itemV2.data, tracks.totalCount, images[].url). Field paths need
-        // runtime verification against a real account — adjust if Spotify changed it.
-        val items = data.jsonObject["libraryV3"]?.jsonObject?.get("items")?.jsonArray
-            ?: return emptyList()
-        return items.mapNotNull { item ->
-            val pl = item.jsonObject["itemV2"]?.jsonObject?.get("data")?.jsonObject
+        // Path mirrors Meld's verified libraryV3 parse:
+        //   data.me.libraryV3.items[].item (wrapper)
+        //     -> wrapper.data (Playlist), wrapper._uri for the id.
+        // Tolerant fallbacks keep us alive if Spotify reshuffles the wrapper key
+        // or drops the `me` segment.
+        val me = data["me"]?.takeIf { it !is JsonNull }?.jsonObject
+        val library = (me ?: data)["libraryV3"]?.takeIf { it !is JsonNull }?.jsonObject
+        val items = library?.get("items")?.takeIf { it !is JsonNull }?.jsonArray
+        if (items == null) {
+            TrackLog.w(
+                "SpotifyClient",
+                "parsePlaylists: no items; dataKeys=${data.keys}, me?=${me != null}, " +
+                    "libraryV3?=${library != null}",
+            )
+            return emptyList()
+        }
+        return items.mapNotNull { itemElem ->
+            val wrapper = itemElem.jsonObject["item"]?.takeIf { it !is JsonNull }?.jsonObject
+                ?: itemElem.jsonObject["itemV2"]?.takeIf { it !is JsonNull }?.jsonObject
                 ?: return@mapNotNull null
-            if (pl["__typename"]?.jsonPrimitive?.content != "Playlist") return@mapNotNull null
-            val uri = pl["uri"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val typeName = wrapper["__typename"]?.takeIf { it !is JsonNull }
+                ?.jsonPrimitive?.content.orEmpty()
+            // Accept PlaylistResponseWrapper and any *Playlist* typename
+            // (collaborative playlists historically surfaced under variants).
+            if (typeName != "PlaylistResponseWrapper" &&
+                !typeName.contains("Playlist", ignoreCase = true)
+            ) return@mapNotNull null
+            val pl = wrapper["data"]?.takeIf { it !is JsonNull }?.jsonObject
+                ?: return@mapNotNull null
+            if (pl["__typename"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content != "Playlist") {
+                return@mapNotNull null
+            }
+            val uri = wrapper["_uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: pl["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: return@mapNotNull null
             SpotifyPlaylist(
                 id = uri.removePrefix("spotify:playlist:"),
-                name = pl["name"]?.jsonPrimitive?.content.orEmpty(),
-                trackCount = pl["tracks"]?.jsonObject?.get("totalCount")?.jsonPrimitive?.content
+                name = pl["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content.orEmpty(),
+                trackCount = pl["tracks"]?.takeIf { it !is JsonNull }?.jsonObject
+                    ?.get("totalCount")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
                     ?.toIntOrNull() ?: 0,
-                imageUrl = pl["images"]?.jsonArray?.firstOrNull()
-                    ?.jsonObject?.get("url")?.jsonPrimitive?.content,
+                imageUrl = parsePlaylistImage(pl),
             )
         }
+    }
+
+    /**
+     * Extracts a playlist cover URL from the GQL `images` field.
+     * Current Web Player shape: `images.items[].sources[].url`. Older/flat
+     * shape `images[].url` is accepted as a fallback.
+     */
+    private fun parsePlaylistImage(pl: JsonObject): String? {
+        val imagesElem = pl["images"]?.takeIf { it !is JsonNull } ?: return null
+        (imagesElem as? JsonObject)?.get("items")?.takeIf { it !is JsonNull }?.jsonArray?.let { groups ->
+            for (group in groups) {
+                val url = group.jsonObject["sources"]?.takeIf { it !is JsonNull }?.jsonArray
+                    ?.firstOrNull()?.jsonObject?.get("url")
+                    ?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                if (!url.isNullOrEmpty()) return url
+            }
+        }
+        (imagesElem as? JsonArray)?.firstOrNull()?.jsonObject?.get("url")
+            ?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let { return it }
+        return null
     }
 }
