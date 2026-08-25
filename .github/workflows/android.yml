@@ -41,12 +41,46 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: BitChord-debug
           path: release
+      - name: Build structured changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          RANGE="${PREV:+$PREV..}$TAG"
+          log() { git log --pretty=format:'- %s' "$RANGE" | grep -Ei "^- $1" | sed -E 's/^- [a-z]+\(([^)]*)\): /*\1* — /I; s/^- [a-z]+: /*/I' || echo "- _none_"; }
+          {
+            echo "## 📦 BitChord $TAG"
+            echo
+            if [[ "$TAG" == *-* ]]; then
+              echo "> 🚧 **Pre-release** — expect rough edges. Feedback welcome."
+            else
+              echo "> ✅ **Stable release**"
+            fi
+            echo
+            echo "### ✨ New features"
+            log 'feat'
+            echo
+            echo "### 🛠 Fixes"
+            log 'fix'
+            echo
+            echo "### ⚡ Improvements"
+            log 'perf|style|refactor'
+            echo
+            echo "### 🧹 Housekeeping"
+            log 'ci|docs|chore|build'
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
+          name: BitChord ${{ github.ref_name }}${{ contains(github.ref_name, '-') && ' (Beta)' || '' }}
+          body_path: RELEASE_NOTES.md
           files: release/**/*.apk
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
