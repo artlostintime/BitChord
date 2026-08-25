@@ -106,7 +106,11 @@ data class BrowseItem(
 
 /** Search rows are heterogeneous once filters other than "Songs" are used. */
 sealed interface SearchResult {
-    data class Track(val song: Song) : SearchResult
+    data class Track(
+        val song: Song,
+        /** Display name of the non-YouTube source that served this row, for the UI chip. Null for YouTube. */
+        val sourceLabel: String? = null,
+    ) : SearchResult
     data class Browse(val item: BrowseItem) : SearchResult
 }
 

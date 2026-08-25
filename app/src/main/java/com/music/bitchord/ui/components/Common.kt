@@ -127,6 +127,11 @@ fun SongRow(
      * wash it stops being legible as a second line and starts disappearing.
      */
     subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    /**
+     * Optional trailing content drawn at the row's end (after the duration,
+     * before the more button) — used to tag a result with its source.
+     */
+    trailing: @Composable (() -> Unit)? = null,
 ) {
     val swipeStateHolder = remember { mutableStateOf<SwipeToDismissBoxState?>(null) }
     var boxWidth by remember { mutableFloatStateOf(0f) }
@@ -147,7 +152,7 @@ fun SongRow(
     swipeStateHolder.value = swipeState
 
     if (onSwipeToQueue == null) {
-        SongRowContent(song, onClick, onLongPress, modifier, trackNumber, subtitleColor)
+        SongRowContent(song, onClick, onLongPress, modifier, trackNumber, subtitleColor, trailing)
         return
     }
 
@@ -163,6 +168,7 @@ fun SongRow(
             modifier = Modifier.background(rowBackground),
             trackNumber = trackNumber,
             subtitleColor = subtitleColor,
+            trailing = trailing,
         )
     }
 }
@@ -223,6 +229,7 @@ private fun SongRowContent(
     modifier: Modifier = Modifier,
     trackNumber: Int? = null,
     subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    trailing: @Composable (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -278,6 +285,7 @@ private fun SongRowContent(
                 color = subtitleColor,
             )
         }
+        trailing?.invoke()
         // Same sheet the long-press opens, for anyone who doesn't think to hold.
         if (onLongPress != null) {
             Box(

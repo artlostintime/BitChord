@@ -38,6 +38,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +53,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
+import com.music.bitchord.data.TrackLog
 import java.util.concurrent.atomic.AtomicLong
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -1036,23 +1038,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _results.value = cached?.let { UiState.Success(it) } ?: UiState.Loading
                 if (exact != null) return@collectLatest
 
-                // Search is YouTube's alone. A module is a *substitution*
-                // layer, not a catalogue to browse: it never has cover art,
-                // radio, related tracks or an album page, so its rows arrived
-                // in the results list looking like YouTube's and then behaved
-                // nothing like them. Every track found here takes the ordinary
-                // YouTube path and is handed to the module at playback time —
-                // see [SourceResolver.substituteForYouTube] — which upgrades
-                // the ones it holds without any of them having to be a
-                // separate row to pick between.
-                val result = YtMusicRepository.search(request.query, request.filter)
+                // Fan the query out to every enabled non-YouTube source in
+                // parallel (see [sourceResults]) alongside the YouTube Music
+                // search, so tracks YouTube doesn't carry — covers, unlisted
+                // cuts — still surface, ranked above YouTube's own rows.
+                val (ytResult, nonYt) = coroutineScope {
+                    val ytDeferred = async { YtMusicRepository.search(request.query, request.filter) }
+                    val sourceDeferred = async { sourceResults(request.query, request.filter) }
+                    ytDeferred.await() to sourceDeferred.await()
+                }
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
                 if (request.requestId != newestRequestId.get()) return@collectLatest
-                _results.value = result.fold(
-                    onSuccess = { rows -> published(rows, key) },
-                    onFailure = { failure -> UiState.Error(failure.friendly()) },
-                )
+
+                _results.value = when {
+                    ytResult.isSuccess ->
+                        published(mergeSearch(nonYt, ytResult.getOrDefault(emptyList())), key)
+                    nonYt.isNotEmpty() ->
+                        // YouTube failed but the sources still answered.
+                        published(nonYt, key)
+                    else ->
+                        UiState.Error(ytResult.exceptionOrNull()?.friendly() ?: "No results")
+                }
             }
     }
 
@@ -1105,13 +1112,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The enabled non-YouTube sources, asked at the same time and returned
-     * split at YouTube's own place in the order.
+     * Non-YouTube results for a Songs search, fanned out to every enabled
+     * source in parallel and returned in the user's source-priority order
+     * ([SourceRegistry.active], which already honours [AppSettings.sourceOrder]).
      *
-     * The split is what makes the Sources screen's ordering visible where it
-     * matters most. A library server ranked above YouTube puts its own copies
-     * at the top of the results — which is the whole point of ranking it there —
-     * and one ranked below appears under them instead.
+     * Each row is tagged with its source's display name so the UI can show a
+     * chip. A source that errors or times out is skipped (logged, not failed) —
+     * one bad server must not sink the whole search.
      *
      * Only the Songs filter fans out: albums, artists and playlists are
      * browse-shaped, and [MusicSource] deliberately answers for tracks only.
@@ -1119,33 +1126,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun sourceResults(
         query: String,
         filter: SearchFilter,
-    ): Pair<List<SearchResult>, List<SearchResult>> = coroutineScope {
-        if (filter != SearchFilter.SONGS) return@coroutineScope emptyList<SearchResult>() to emptyList()
-        val active = SourceRegistry.active()
-        val youtubeRank = active.indexOfFirst { it.kind == SourceKind.YOUTUBE }
-            .let { if (it < 0) active.size else it }
+    ): List<SearchResult> = coroutineScope {
+        if (filter != SearchFilter.SONGS) return@coroutineScope emptyList()
+        val active = SourceRegistry.active().filter { it.kind != SourceKind.YOUTUBE }
 
-        val answers = active
-            .filter { it.kind != SourceKind.YOUTUBE }
-            .map { source ->
-                source to async {
-                    // Per-source, so one slow or unreachable server delays the
-                    // results by at most this much rather than for as long as
-                    // its socket takes to give up.
-                    runCatching {
-                        withTimeout(SOURCE_SEARCH_TIMEOUT_MS) { source.search(query, SOURCE_SEARCH_LIMIT) }
-                    }.getOrDefault(emptyList())
-                }
+        val answers = active.map { source ->
+            source to async {
+                runCatching {
+                    // Per-source timeout so one slow or unreachable server
+                    // delays results by at most this much rather than for as
+                    // long as its socket takes to give up.
+                    withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
+                        source.search(query, SOURCE_SEARCH_LIMIT)
+                    } ?: emptyList()
+                }.onFailure {
+                    TrackLog.w("BitChord", "source '${source.displayName}' search failed: ${it.message}")
+                }.getOrDefault(emptyList())
             }
-
-        val above = mutableListOf<SearchResult>()
-        val below = mutableListOf<SearchResult>()
-        answers.forEach { (source, job) ->
-            val rows = job.await().map { SearchResult.Track(it) }
-            val rank = active.indexOfFirst { it.configId == source.configId }
-            if (rank in 0 until youtubeRank) above += rows else below += rows
         }
-        above to below
+
+        // Iterate in source-rank order; de-duplicate across sources keeping the
+        // higher-priority (earlier) source's row.
+        val seen = mutableSetOf<String>()
+        val out = mutableListOf<SearchResult>()
+        answers.forEach { (source, job) ->
+            job.await().forEach { song ->
+                val key = "${song.title.lowercase()}${song.artist.lowercase()}"
+                if (seen.add(key)) out += SearchResult.Track(song, sourceLabel = source.displayName)
+            }
+        }
+        out
+    }
+
+    /**
+     * Merges non-YouTube results (already source-priority ordered) ahead of the
+     * YouTube Music results, de-duplicating by (title + artist) and keeping the
+     * higher-priority entry — which is the non-YouTube one, since it comes first.
+     */
+    private fun mergeSearch(nonYt: List<SearchResult>, yt: List<SearchResult>): List<SearchResult> {
+        val seen = mutableSetOf<String>()
+        val out = mutableListOf<SearchResult>()
+        for (row in nonYt + yt) {
+            val song = (row as? SearchResult.Track)?.song
+            if (song == null) {
+                // Browse rows (albums/artists/playlists) pass through untouched.
+                out += row
+                continue
+            }
+            val key = "${song.title.lowercase()}${song.artist.lowercase()}"
+            if (seen.add(key)) out += row
+        }
+        return out
     }
 
     /**
@@ -1189,7 +1220,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          * holding the whole result list for it would make search feel worse
          * for the sake of results the user can still get by searching again.
          */
-        const val SOURCE_SEARCH_TIMEOUT_MS = 4000L
+        const val SOURCE_SEARCH_TIMEOUT_MS = 8000L
 
         /** Enough to be worth scrolling, short enough not to bury YouTube's own rows. */
         const val SOURCE_SEARCH_LIMIT = 12

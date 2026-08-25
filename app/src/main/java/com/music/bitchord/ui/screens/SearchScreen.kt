@@ -156,6 +156,9 @@ fun SearchScreen(
                                 },
                                 onLongPress = { onSongLongPress(row.song) },
                                 onSwipeToQueue = { onSongSwipe(row.song) },
+                                trailing = if (row.sourceLabel != null) {
+                                    { SourceChip(row.sourceLabel) }
+                                } else null,
                             )
                             is SearchResult.Browse -> BrowseRow(
                                 item = row.item,
@@ -381,6 +384,26 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * A small pill naming the non-YouTube source that served a search row, so the
+ * user can see a cover or unlisted track came from Qobuz/their library rather
+ * than YouTube. Styling mirrors the category chips on the Extensions screen.
+ */
+@Composable
+private fun SourceChip(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
 }
 
 /**
