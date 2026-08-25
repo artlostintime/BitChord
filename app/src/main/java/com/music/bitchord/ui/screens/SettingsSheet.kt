@@ -98,7 +98,6 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.data.model.Account
-import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceKind
@@ -153,13 +152,16 @@ fun SettingsScreen(
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
+    val sourceOrder by AppSettings.sourceOrder.collectAsStateWithLifecycle()
     val lossless by AppSettings.losslessAudio.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
 
-    // Whether the module index URL is baked into this build.
-    val losslessConfigured = BuildConfig.MODULE_INDEX_URL.trim().isNotEmpty()
+    // Lossless needs a module source — the only kind that can serve bit-exact
+    // audio. Derived from the configs flow (not the build constant) so the row
+    // recomposes the moment the module is added, enabled or removed.
+    val losslessConfigured = sourceConfigs.any { it.kind == SourceKind.MODULE }
     // Whether the module source is currently enabled (toggle state).
     val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
 
@@ -286,7 +288,12 @@ fun SettingsScreen(
                 "and bit-exact for FLAC — move them up to prefer them over " +
                 "streaming. The order here is what BitChord uses to pick a source.",
         ) {
-            val sources = SourceRegistry.orderedConfigs()
+            val rank = sourceOrder.withIndex().associate { (i, id) -> id to i }
+            val sources = sourceConfigs.sortedWith { a, b ->
+                val ra = rank[a.id] ?: Int.MAX_VALUE
+                val rb = rank[b.id] ?: Int.MAX_VALUE
+                if (ra != rb) ra.compareTo(rb) else a.kind.ordinal.compareTo(b.kind.ordinal)
+            }
             sources.forEachIndexed { index, cfg ->
                 val on = cfg.enabled && cfg.isComplete
                 SettingsRow(
