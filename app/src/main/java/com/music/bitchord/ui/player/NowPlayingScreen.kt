@@ -65,6 +65,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
@@ -74,9 +75,14 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1554,7 +1560,10 @@ private fun SweptLyricLine(
     line: LyricLine,
     clock: MutableLongState,
     style: TextStyle,
-    dimAlpha: Float,
+    /** Colour of the already-sung part of the line (primary when this is the active line). */
+    color: Color,
+    /** Colour of the not-yet-sung part (the dimmed, inactive variant). */
+    dimColor: Color,
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
@@ -1594,7 +1603,7 @@ private fun SweptLyricLine(
         Text(
             text = line.text,
             style = style,
-            color = Color.White.copy(alpha = dimAlpha),
+            color = dimColor,
             maxLines = maxLines,
             overflow = overflow,
             onTextLayout = { layout = it },
@@ -1604,7 +1613,7 @@ private fun SweptLyricLine(
             Text(
                 text = line.text,
                 style = style,
-                color = Color.White,
+                color = color,
                 maxLines = maxLines,
                 overflow = overflow,
                 modifier = Modifier
@@ -1637,7 +1646,7 @@ private fun SweptLyricLine(
         Text(
             text = line.text,
             style = style,
-            color = Color.White,
+            color = color,
             maxLines = maxLines,
             overflow = overflow,
             modifier = room.then(sweep),
@@ -1905,9 +1914,18 @@ private fun LyricsPanel(
         ),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
+        // Karaoke palette: the line being sung is the brand primary and bold;
+        // every other line is the surface's muted variant at 40%, brightening
+        // to near-full while the user is browsing the list by hand.
+        val primary = MaterialTheme.colorScheme.primary
+        val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = if (browsing) 0.85f else 0.4f,
+        )
         itemsIndexed(lines) { index, line ->
             val distance = if (activeLine < 0) 0 else abs(index - activeLine)
             val isActive = index == activeLine
+            val lineColor = if (isActive) primary else dim
+            val fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
             // Unbounded, and ahead of the clip: the default edge treatment cuts
             // the blur off at the line's own box, which put a hard edge down
             // either side of every out-of-focus line where the halo should have
@@ -1920,14 +1938,6 @@ private fun LyricsPanel(
                 },
                 label = "lyricBlur",
             )
-            val lineAlpha by animateFloatAsState(
-                targetValue = when {
-                    browsing -> 1f
-                    isActive -> 1f
-                    else -> (0.5f - distance * 0.06f).coerceAtLeast(0.22f)
-                },
-                label = "lyricAlpha",
-            )
             if (line.isGap) {
                 val noteSize by animateDpAsState(
                     targetValue = if (isActive) 34.dp else 26.dp,
@@ -1936,7 +1946,7 @@ private fun LyricsPanel(
                 Icon(
                     imageVector = BitChordIcons.MusicNote,
                     contentDescription = "Instrumental",
-                    tint = Color.White.copy(alpha = lineAlpha),
+                    tint = lineColor,
                     modifier = Modifier
                         .blur(blur, BlurredEdgeTreatment.Unbounded)
                         .clip(RoundedCornerShape(10.dp))
@@ -1950,6 +1960,7 @@ private fun LyricsPanel(
                 val style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 27.sp,
                     lineHeight = 33.sp,
+                    fontWeight = fontWeight,
                 )
                 // The playing line swells a touch. Anchored to its left edge,
                 // so the words don't slide sideways under the highlight as it
@@ -1972,7 +1983,6 @@ private fun LyricsPanel(
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0f, 0.5f)
-                        alpha = lineAlpha
                     }
                     .blur(blur, BlurredEdgeTreatment.Unbounded)
                     .clip(RoundedCornerShape(10.dp))
@@ -1989,15 +1999,12 @@ private fun LyricsPanel(
                     // words: the tail of the line popped up to meet the rest of
                     // it in a single frame. Animating the tail instead lets a
                     // finished line close up as it dims away.
-                    val tail by animateFloatAsState(
-                        targetValue = if (isActive) UNSUNG_ALPHA else 1f,
-                        label = "lyricTail",
-                    )
                     SweptLyricLine(
                         line = line,
                         clock = clock,
                         style = style,
-                        dimAlpha = tail,
+                        color = lineColor,
+                        dimColor = dim,
                         modifier = shape,
                         glowAlpha = glow,
                         glowRoom = GLOW_ROOM,
@@ -2006,7 +2013,7 @@ private fun LyricsPanel(
                     Text(
                         text = line.text,
                         style = style,
-                        color = Color.White,
+                        color = lineColor,
                         modifier = shape.padding(GLOW_ROOM),
                     )
                 }
@@ -2085,18 +2092,20 @@ private fun CurrentLyricLine(
             Icon(
                 imageVector = BitChordIcons.MusicNote,
                 contentDescription = null,
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(6.dp))
         }
+        val primary = MaterialTheme.colorScheme.primary
         val swept = current?.takeIf { !instrumental && it.isWordSynced }
         if (swept != null) {
             SweptLyricLine(
                 line = swept,
                 clock = clock,
-                style = MaterialTheme.typography.titleMedium,
-                dimAlpha = UNSUNG_ALPHA_STRIP,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = primary,
+                dimColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
@@ -2104,8 +2113,8 @@ private fun CurrentLyricLine(
         } else {
             Text(
                 text = text,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = primary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
@@ -2651,6 +2660,7 @@ private class QueueDragState(private val listState: LazyListState) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InlineQueueRow(
     song: Song,
@@ -2664,6 +2674,42 @@ private fun InlineQueueRow(
     onDrag: (Float) -> Unit = {},
     onDragEnd: () -> Unit = {},
 ) {
+    // ponytail: drag-to-reorder already exists via rememberQueueDragState +
+    // the DragHandle below, wired to controller.moveMediaItem — so no up/down
+    // move buttons were added. Swipe-to-dismiss is the new removal gesture,
+    // wired to the existing onRemove -> controller.removeMediaItem.
+    val dismissState = rememberSwipeToDismissBoxState(
+        positionalThreshold = { distance -> distance * 0.5f },
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) onRemove()
+            false // snap back; the queue update removes the row
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.22f),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(end = 24.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = "Remove from queue",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        },
+    ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -2747,6 +2793,7 @@ private fun InlineQueueRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
     }
 }
 
