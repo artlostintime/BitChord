@@ -32,7 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.spotify.SpotifyClient
@@ -234,7 +234,7 @@ fun SpotifyScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Text(song.durationText, style = MaterialTheme.typography.bodySmall)
+                    Text(song.durationText ?: "", style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (songs.isEmpty()) {

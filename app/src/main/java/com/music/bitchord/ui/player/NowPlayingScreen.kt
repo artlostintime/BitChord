@@ -1040,35 +1040,37 @@ fun NowPlayingScreen(
                             // genuinely bit-exact — see [NerdStats.Snapshot.sourceLabel]
                             // and [NerdStats.Snapshot.lossless]. A second line
                             // under the measured stats, same row styling.
-                            nerdStats?.sourceLine()?.let { line ->
-                                Row(
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                ) {
-                                    Text(
-                                        text = line,
-                                        style = nerdStyle,
-                                        color = Color.White.copy(alpha = 0.65f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = if (nerdStats.lossless) "Lossless" else "Lossy",
-                                        style = nerdStyle,
-                                        // Lossless in the accent, lossy in the
-                                        // muted on-surface variant — see
-                                        // [NerdStats.Snapshot.lossless].
-                                        color = if (nerdStats.lossless) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                            nerdStats?.let { snap ->
+                                snap.sourceLine()?.let { line ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    ) {
+                                        Text(
+                                            text = line,
+                                            style = nerdStyle,
+                                            color = Color.White.copy(alpha = 0.65f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = if (snap.lossless) "Lossless" else "Lossy",
+                                            style = nerdStyle,
+                                            // Lossless in the accent, lossy in the
+                                            // muted on-surface variant — see
+                                            // [NerdStats.Snapshot.lossless].
+                                            color = if (snap.lossless) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
                             }
                             // Only when Automix is actually switched on:
