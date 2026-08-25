@@ -9,7 +9,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import javax.crypto.Mac
-import javax.crypto.SecretKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * ZARZ-HMAC-V1 signed-session client.
@@ -44,7 +44,7 @@ internal object ZarzSession {
     // ponytail: refresh retries exactly once with no backoff. Add exponential
     // backoff if the gateway rate-limits handshakes under load.
 
-    private data class Session(val sessionId: String, val sessionKey: String)
+    internal data class Session(val sessionId: String, val sessionKey: String)
     private data class Bootstrap(val sessionId: String, val challenge: String)
 
     // ── Public surface ───────────────────────────────────────────────────────

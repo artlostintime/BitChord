@@ -265,7 +265,7 @@ fun SpotifyScreen(
                 playlistError != null -> item {
                     MessageState(message = playlistError!!)
                 }
-                playlistSongs == null || playlistSongs.isEmpty() -> item {
+                playlistSongs.isNullOrEmpty() -> item {
                     MessageState(message = "No tracks resolved for this playlist.")
                 }
                 else -> {
