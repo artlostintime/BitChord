@@ -109,9 +109,12 @@ object SflxInstaller {
                 // ponytail: no signature verification beyond sha256; a malicious
                 // registry operator who can also swap the bytes defeats it. Add
                 // GPG/cosign verification if extensions become untrusted.
-                if (manifest.requiredRuntimeFeatures.contains("signedSession@1")) {
+                // signedSession@1 is satisfied by the ZarzSession binding; only
+                // genuinely unknown features block installation.
+                val unsupported = manifest.requiredRuntimeFeatures.filter { it != "signedSession@1" }
+                if (unsupported.isNotEmpty()) {
                     throw UnsupportedOperationException(
-                        "extension ${entry.id} requires runtime feature signedSession@1, " +
+                        "extension ${entry.id} requires runtime feature ${unsupported.first()}, " +
                             "which this build does not implement",
                     )
                 }

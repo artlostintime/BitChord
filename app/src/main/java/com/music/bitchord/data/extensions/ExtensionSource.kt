@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.dokar.quickjs.QuickJs
 import com.dokar.quickjs.binding.AsyncFunctionBinding
+import com.dokar.quickjs.binding.FunctionBinding
 import com.dokar.quickjs.binding.define
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.TrackLog
@@ -67,8 +68,11 @@ class ExtensionSource(
             return@withContext SourceHealth.Rejected("Extension $extId is not installed")
         }
         val manifest = manifest()
-        if (manifest.requiredRuntimeFeatures.contains("signedSession@1")) {
-            return@withContext SourceHealth.Rejected("Requires unsupported runtime feature signedSession@1")
+        // signedSession@1 is now satisfied by the ZarzSession binding; only
+        // genuinely unknown features still reject the extension.
+        val unsupported = manifest.requiredRuntimeFeatures.filter { it != "signedSession@1" }
+        if (unsupported.isNotEmpty()) {
+            return@withContext SourceHealth.Rejected("Requires unsupported runtime feature ${unsupported.first()}")
         }
         // ponytail: health only checks files + declared features, not that the
         // JS actually exports searchTracks/download — that is verified at load.
@@ -209,8 +213,9 @@ internal object ExtensionJs {
         storage: SharedPreferences,
     ): Result<Unit> = withContext(Dispatchers.Default) {
         runCatching {
-            if (manifest.requiredRuntimeFeatures.contains("signedSession@1")) {
-                throw UnsupportedOperationException("signedSession@1 runtime feature unsupported")
+            val unsupported = manifest.requiredRuntimeFeatures.filter { it != "signedSession@1" }
+            if (unsupported.isNotEmpty()) {
+                throw UnsupportedOperationException("${unsupported.first()} runtime feature unsupported")
             }
             val qjs = QuickJs.create(Dispatchers.Default)
             qjs.maxStackSize = 512 * 1024L
@@ -219,6 +224,7 @@ internal object ExtensionJs {
             bindFetch(qjs, extId)
             bindStorage(qjs, extId)
             bindFile(qjs, extId)
+            bindSession(qjs)
             // The extension calls global registerExtension({...}); stash the
             // descriptor on a global so we can invoke its methods by name later.
             qjs.evaluate<Unit>(
@@ -366,6 +372,29 @@ internal object ExtensionJs {
                     }
                     downloadToFile(finalUrl, path)
                     return path
+                }
+            })
+        }
+    }
+
+    private fun bindSession(qjs: QuickJs) {
+        qjs.define("session") {
+            asyncFunction("signedFetch", object : AsyncFunctionBinding<String> {
+                override suspend fun invoke(args: Array<Any?>): String {
+                    val url = args[0]?.toString()
+                        ?: throw IllegalArgumentException("session.signedFetch requires a url")
+                    return ZarzSession.signedFetch(url).getOrElse { throw it }
+                }
+            })
+            function("signedTicket", object : FunctionBinding<String> {
+                override fun invoke(args: Array<Any?>): String {
+                    val provider = args.getOrNull(0)?.toString()
+                        ?: throw IllegalArgumentException("session.signedTicket requires provider")
+                    val type = args.getOrNull(1)?.toString()
+                        ?: throw IllegalArgumentException("session.signedTicket requires type")
+                    val id = args.getOrNull(2)?.toString()
+                        ?: throw IllegalArgumentException("session.signedTicket requires id")
+                    return ZarzSession.signedTicket(provider, type, id)
                 }
             })
         }
