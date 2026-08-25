@@ -788,10 +788,11 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                 )
             } else when (selectedTab) {
                 TAB_HOME -> {
+                    val spotifyHome = spotifyHomeState
                     val useSpotifyHome = viewModel.spotifySpDc != null &&
-                        spotifyHomeState is UiState.Success &&
-                        spotifyHomeState.data.isNotEmpty()
-                    val effectiveHomeState = if (useSpotifyHome) spotifyHomeState else homeState
+                        spotifyHome is UiState.Success &&
+                        spotifyHome.data.isNotEmpty()
+                    val effectiveHomeState = if (useSpotifyHome) spotifyHome else homeState
                     HomeScreen(
                         state = effectiveHomeState,
                         listState = homeListState,
