@@ -79,6 +79,15 @@ enum class RecommendationSource(val label: String) {
 }
 
 /**
+ * Interface mode. STANDARD hides power-user settings; ADVANCED exposes
+ * everything. Purely a visual filter on the settings UI — no behaviour
+ * changes between the two beyond what rows are shown.
+ */
+enum class UiMode(val label: String) {
+    STANDARD("Standard"), ADVANCED("Advanced")
+}
+
+/**
  * App settings, backed by SharedPreferences and exposed as flows.
  *
  * PlaybackService runs in the same process as the UI, so it observes these
@@ -241,6 +250,9 @@ object AppSettings {
      */
     val recommendationSource = MutableStateFlow(RecommendationSource.GOOGLE)
 
+    /** Interface mode: STANDARD hides power-user settings, ADVANCED shows all. */
+    val uiMode = MutableStateFlow(UiMode.STANDARD)
+
     // ── Scrobbling ──────────────────────────────────────────────────────
 
     /**
@@ -389,6 +401,9 @@ object AppSettings {
         recommendationSource.value = runCatching {
             RecommendationSource.valueOf(prefs.getString(KEY_RECOMMENDATION_SOURCE, null) ?: "GOOGLE")
         }.getOrDefault(RecommendationSource.GOOGLE)
+        uiMode.value = runCatching {
+            UiMode.valueOf(prefs.getString(KEY_UI_MODE, null) ?: "STANDARD")
+        }.getOrDefault(UiMode.STANDARD)
         extensionRepoUrls.value = readExtensionRepoUrls()
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
@@ -632,6 +647,11 @@ object AppSettings {
         prefs.edit().putString(KEY_RECOMMENDATION_SOURCE, value.name).apply()
     }
 
+    fun setUiMode(value: UiMode) {
+        uiMode.value = value
+        prefs.edit().putString(KEY_UI_MODE, value.name).apply()
+    }
+
     /**
      * Stored as a joined list of names rather than a string set: a name that
      * no longer exists — a source dropped in a later build — has to fall out
@@ -854,6 +874,7 @@ object AppSettings {
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_SOURCE_ORDER = "source_order"
     private const val KEY_RECOMMENDATION_SOURCE = "recommendation_source"
+    private const val KEY_UI_MODE = "ui_mode"
     private const val KEY_EXTENSION_REPO_URLS = "extension_repo_urls"
 
     private const val KEY_LASTFM_ENABLED = "lastfm_enabled"

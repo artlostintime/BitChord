@@ -105,6 +105,7 @@ import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.settings.AudioTier
 import com.music.bitchord.data.settings.ThemeMode
+import com.music.bitchord.data.settings.UiMode
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.playback.DolbyAtmos
 import com.music.bitchord.ui.player.fullBleedArtworkAvailable
@@ -148,6 +149,8 @@ fun SettingsScreen(
     val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
+    val uiMode by AppSettings.uiMode.collectAsStateWithLifecycle()
+    val advanced = uiMode == UiMode.ADVANCED
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
@@ -201,6 +204,20 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
+
+        SettingsGroup(header = "Interface mode") {
+            SettingsRow(
+                icon = Icons.Rounded.Tune,
+                title = "Interface mode",
+                subtitle = "Advanced exposes power-user settings",
+            )
+            SegmentedControl(
+                options = UiMode.entries.map { it.label },
+                selectedIndex = UiMode.entries.indexOf(uiMode),
+                onSelect = { AppSettings.setUiMode(UiMode.entries[it]) },
+                modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+            )
+        }
 
         SettingsGroup {
             SettingsRow(
@@ -257,14 +274,16 @@ fun SettingsScreen(
                     subtitle = cfg.kind.label,
                     trailing = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { moveSource(index, up = true) },
-                                enabled = index > 0,
-                            ) { Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up") }
-                            IconButton(
-                                onClick = { moveSource(index, up = false) },
-                                enabled = index < sources.lastIndex,
-                            ) { Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down") }
+                            if (advanced) {
+                                IconButton(
+                                    onClick = { moveSource(index, up = true) },
+                                    enabled = index > 0,
+                                ) { Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up") }
+                                IconButton(
+                                    onClick = { moveSource(index, up = false) },
+                                    enabled = index < sources.lastIndex,
+                                ) { Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down") }
+                            }
                             Switch(
                                 checked = on,
                                 onCheckedChange = { SourceRegistry.setEnabled(cfg.id, it) },
@@ -381,23 +400,25 @@ fun SettingsScreen(
                 subtitle = "Your device's system panel",
                 onClick = { openEqualizer(context, sessionId) },
             )
-            RowDivider()
-            SettingsRow(
-                icon = Icons.Rounded.GraphicEq,
-                title = "Show stats for nerds",
-                subtitle = "Codec, bitrate and sample rate on the player",
-                trailing = {
-                    Switch(
-                        checked = nerdStats,
-                        onCheckedChange = AppSettings::setShowNerdStats,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setShowNerdStats(!nerdStats) },
-            )
+            if (advanced) {
+                RowDivider()
+                SettingsRow(
+                    icon = Icons.Rounded.GraphicEq,
+                    title = "Show stats for nerds",
+                    subtitle = "Codec, bitrate and sample rate on the player",
+                    trailing = {
+                        Switch(
+                            checked = nerdStats,
+                            onCheckedChange = AppSettings::setShowNerdStats,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowNerdStats(!nerdStats) },
+                )
+            }
         }
 
         SettingsGroup(header = "Appearance") {
