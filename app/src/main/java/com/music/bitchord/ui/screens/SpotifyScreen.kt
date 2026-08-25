@@ -240,8 +240,8 @@ fun SpotifyScreen(
             playlists.isEmpty() -> item {
                 MessageState(message = "No playlists found on this account.")
             }
-            else -> items(playlists.size, key = { playlists[it].id }) { index ->
-                val playlist = playlists[index]
+            else -> items(playlists.size, key = { index -> "${playlists[index].id}#$index" }) { index ->
+                val playlist = playlists.getOrNull(index) ?: return@items
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -250,9 +250,9 @@ fun SpotifyScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    if (playlist.imageUrl != null) {
+                    playlist.imageUrl?.let { url ->
                         AsyncImage(
-                            model = playlist.imageUrl,
+                            model = url,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).thumbnailBorder(RoundedCornerShape(6.dp)),
@@ -323,8 +323,9 @@ fun SpotifyScreen(
                             }
                         }
                     }
-                    items(resolved.size, key = { resolved[it].videoId }) { index ->
-                        SpotifyTrackRow(resolved[index], onClick = { onPlay(resolved, index) })
+                    items(resolved.size, key = { index -> "${resolved[index].videoId}#$index" }) { index ->
+                        val song = resolved.getOrNull(index) ?: return@items
+                        SpotifyTrackRow(song, onClick = { onPlay(resolved, index) })
                     }
                 }
             }
@@ -354,8 +355,9 @@ fun SpotifyScreen(
             songs.isEmpty() -> item {
                 MessageState(message = "No liked songs found on this account.")
             }
-            else -> items(songs.size, key = { songs[it].videoId }) { index ->
-                SpotifyTrackRow(songs[index], onClick = { onPlay(songs, index) })
+            else -> items(songs.size, key = { index -> "${songs[index].videoId}#$index" }) { index ->
+                val song = songs.getOrNull(index) ?: return@items
+                SpotifyTrackRow(song, onClick = { onPlay(songs, index) })
             }
         }
 

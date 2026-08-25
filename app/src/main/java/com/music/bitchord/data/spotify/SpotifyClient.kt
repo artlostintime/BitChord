@@ -354,7 +354,10 @@ object SpotifyClient {
             if (page.size < PAGE_LIMIT) break
             offset += PAGE_LIMIT
         }
-        return all
+        // ponytail: libraryV3 + flatten can return the same playlist more than
+        // once (folder copy + flat copy); dedupe by id so LazyColumn keys stay
+        // unique and scrolling can't hit a key-collision crash.
+        return all.distinctBy { it.id }
     }
 
     private fun parsePlaylists(data: JsonObject): List<SpotifyPlaylist> {
@@ -395,7 +398,9 @@ object SpotifyClient {
                 ?: return@mapNotNull null
             SpotifyPlaylist(
                 id = uri.removePrefix("spotify:playlist:"),
-                name = pl["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content.orEmpty(),
+                name = pl["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                    ?: wrapper["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                    ?: "",
                 trackCount = pl["tracks"]?.takeIf { it !is JsonNull }?.jsonObject
                     ?.get("totalCount")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
                     ?.toIntOrNull() ?: 0,
