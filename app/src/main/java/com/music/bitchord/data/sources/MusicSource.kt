@@ -65,6 +65,13 @@ data class SourceStream(
      * the honest answer: nobody "served" those.
      */
     val sourceLabel: String? = null,
+    /**
+     * The [TrackMatcher] confidence (0–~200) of the row that produced this
+     * stream, when it came from a search. Carried so [SourceResolver.score] can
+     * use match strength as a tiebreaker without re-matching. Null for streams
+     * built directly from a known id (a pinned source, a YouTube URL).
+     */
+    val confidence: Int? = null,
     val headers: Map<String, String> = emptyMap(),
     /**
      * Whether this is less than was asked for, taken because nothing better

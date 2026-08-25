@@ -486,10 +486,15 @@ class PlaybackService : MediaSessionService() {
             // because these carry no `v` parameter and would otherwise fall
             // straight through unresolved.
             if (dataSpec.uri.authority == "source") {
-                val stream = runBlocking(about) {
+                val t = dataSpec.uri.getQueryParameter("t")
+                // Automatic fallback: if this track failed on its chosen source,
+                // the next-best candidate recorded at resolve time takes over on
+                // the retry re-open — see [SourceResolver.takeFallback].
+                val fallback = t?.let { SourceResolver.takeFallback(it) }
+                val stream = fallback ?: runBlocking(about) {
                     withTimeout(RESOLVE_TIMEOUT_MS) { SourceResolver.resolve(dataSpec.uri) }
                 } ?: throw java.io.IOException("No enabled source could serve ${dataSpec.uri.getQueryParameter("n")}")
-                NerdStats.onSourceStream(dataSpec.uri.getQueryParameter("t"), stream.format, stream.sourceLabel)
+                NerdStats.onSourceStream(t, stream.format, stream.sourceLabel)
                 return@Factory dataSpec.buildUpon()
                     .setUri(Uri.parse(stream.url))
                     .setHttpRequestHeaders(stream.headers)
@@ -1032,6 +1037,14 @@ class PlaybackService : MediaSessionService() {
             QualityUpgrade.refuseUpgrades(videoId)
         }
         uri?.getQueryParameter("v")?.let(StreamChoice::forget)
+        // A source-backed track that died on its chosen source gets one automatic
+        // retry onto the next-best candidate recorded at resolve time — see
+        // [SourceResolver.takeFallback]. Distinct from the substitution refusal
+        // below: a module-queued track has no YouTube to fall back to, so its
+        // fallback is the next module, not YouTube.
+        if (uri?.authority == "source") {
+            uri.getQueryParameter("t")?.let(SourceResolver::markFailed)
+        }
         scope.launch(TrackLog.about(mediaId)) {
             // Long enough for the released source to let go of the cache keys
             // about to be removed, short enough to read as a stutter.
