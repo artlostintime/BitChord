@@ -25,6 +25,41 @@ enum class AudioQuality(
     LOW(64, "Low", "~64 kbps · smallest download", "29 MB/hr"),
     MEDIUM(128, "Medium", "~128 kbps · balanced", "58 MB/hr"),
     HIGH(Int.MAX_VALUE, "High", "Best available · ~171 kbps Opus", "77 MB/hr"),
+    /**
+     * 256 kbps ceiling for [AudioTier.HIGH]. Deliberately distinct from [HIGH]:
+     * [com.music.bitchord.data.sources.SourceResolver.requestForNow] treats
+     * [HIGH] as the lossless-eligible sentinel, so the 256 tier must be a
+     * different constant or it would wrongly require a bit-exact stream.
+     */
+    TIER_HIGH(256, "High", "AAC 256 kbps", "112 MB/hr"),
+}
+
+/**
+ * The user-facing audio quality choice, modelled on Apple Music / Tidal tiers.
+ *
+ * This is the single source of truth for what to fetch. The legacy
+ * [AudioQuality] plumbing — [audioQualityWifi], [audioQualityCellular],
+ * [losslessAudio], [effectiveAudioQuality] — is kept in sync from here, so the
+ * source resolver and the player UI that still read those fields keep working
+ * without change.
+ */
+enum class AudioTier(val label: String, val detail: String) {
+    HI_RES_LOSSLESS("Hi-Res Lossless", "up to 24-bit/192 kHz FLAC"),
+    LOSSLESS("Lossless", "16-bit/44.1 kHz FLAC"),
+    HIGH("High", "AAC 256 kbps"),
+    NORMAL("Normal", "~128 kbps Opus");
+
+    /** Whether this tier must only ever resolve to a bit-exact stream. */
+    val isLossless: Boolean
+        get() = this == LOSSLESS || this == HI_RES_LOSSLESS
+
+    /** The [AudioQuality] ceiling this tier maps to for the legacy plumbing. */
+    fun toAudioQuality(): AudioQuality = when (this) {
+        HI_RES_LOSSLESS -> AudioQuality.HIGH
+        LOSSLESS -> AudioQuality.HIGH
+        HIGH -> AudioQuality.TIER_HIGH
+        NORMAL -> AudioQuality.MEDIUM
+    }
 }
 
 enum class ThemeMode(val label: String) {
@@ -64,6 +99,17 @@ object AppSettings {
      */
     val audioQualityWifi = MutableStateFlow(AudioQuality.HIGH)
     val audioQualityCellular = MutableStateFlow(AudioQuality.HIGH)
+
+    /**
+     * The single, global audio quality tier the user picked. Replaces the old
+     * per-connection Low/Medium/High split; the per-network flows above are
+     * derived from this so nothing downstream changes.
+     *
+     * ponytail: one global tier, not a Wi-Fi/mobile pair — re-add per-network
+     * tiers here (and branch [effectiveAudioQuality]) if data-plan budgeting
+     * on mobile is wanted again.
+     */
+    val audioTier = MutableStateFlow(AudioTier.HIGH)
 
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
@@ -317,9 +363,9 @@ object AppSettings {
     fun init(context: Context) {
         prefs = context.getSharedPreferences("bitchord_settings", Context.MODE_PRIVATE)
         migrateSingleQuality()
-        audioQualityWifi.value = readQuality(KEY_QUALITY_WIFI)
-        audioQualityCellular.value = readQuality(KEY_QUALITY_CELLULAR)
-        losslessAudio.value = prefs.getBoolean(KEY_LOSSLESS, true)
+        val tier = readTier()
+        audioTier.value = tier
+        syncLegacyFromTier(tier)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
@@ -413,9 +459,26 @@ object AppSettings {
             .apply()
     }
 
-    private fun readQuality(key: String): AudioQuality {
-        val stored = prefs.getString(key, null) ?: return AudioQuality.HIGH
-        return runCatching { AudioQuality.valueOf(stored) }.getOrDefault(AudioQuality.HIGH)
+    /**
+     * Read the persisted tier, migrating from the old per-network quality +
+     * lossless flag so an existing install keeps its behaviour. Old default
+     * (High + lossless on) maps to [AudioTier.LOSSLESS]; a fresh install with
+     * nothing stored defaults to [AudioTier.HIGH].
+     */
+    private fun readTier(): AudioTier {
+        prefs.getString(KEY_TIER, null)?.let {
+            return runCatching { AudioTier.valueOf(it) }.getOrDefault(AudioTier.HIGH)
+        }
+        val legacyWifi = prefs.getString(KEY_QUALITY_WIFI, null)
+        val legacyCellular = prefs.getString(KEY_QUALITY_CELLULAR, null)
+        if (legacyWifi == null && legacyCellular == null) return AudioTier.HIGH
+        val oldQuality = legacyWifi ?: legacyCellular
+        val oldLossless = prefs.getBoolean(KEY_LOSSLESS, false)
+        return when {
+            oldQuality == "HIGH" && oldLossless -> AudioTier.LOSSLESS
+            oldQuality == "HIGH" -> AudioTier.HIGH
+            else -> AudioTier.NORMAL
+        }
     }
 
     /**
@@ -459,6 +522,27 @@ object AppSettings {
     fun setAudioQualityCellular(value: AudioQuality) {
         audioQualityCellular.value = value
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+    }
+
+    /**
+     * Pick a real quality tier. The legacy per-network [AudioQuality] flows and
+     * the [losslessAudio] flag are pushed from here so the source resolver's
+     * existing lossless gating (driven by [losslessAudio]) engages for the
+     * [AudioTier.LOSSLESS] / [AudioTier.HI_RES_LOSSLESS] tiers without any
+     * other file changing.
+     */
+    fun setAudioTier(tier: AudioTier) {
+        audioTier.value = tier
+        syncLegacyFromTier(tier)
+        prefs.edit().putString(KEY_TIER, tier.name).apply()
+    }
+
+    /** Push the chosen tier into the legacy per-network + lossless flows. */
+    private fun syncLegacyFromTier(tier: AudioTier) {
+        val quality = tier.toAudioQuality()
+        audioQualityWifi.value = quality
+        audioQualityCellular.value = quality
+        losslessAudio.value = tier.isLossless
     }
 
     fun setLosslessAudio(value: Boolean) {
@@ -748,6 +832,7 @@ object AppSettings {
     private const val KEY_QUALITY_LEGACY = "audio_quality"
     private const val KEY_QUALITY_WIFI = "audio_quality_wifi"
     private const val KEY_QUALITY_CELLULAR = "audio_quality_cellular"
+    private const val KEY_TIER = "audio_tier"
     private const val KEY_LOSSLESS = "lossless_audio"
     private const val KEY_CROSSFADE = "crossfade_seconds"
     private const val KEY_SMART_FADE = "smart_fade_enabled"

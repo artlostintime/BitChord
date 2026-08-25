@@ -44,7 +44,6 @@ import androidx.compose.material.icons.rounded.MusicOff
 import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlaylistPlay
-import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
@@ -54,7 +53,6 @@ import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Waves
-import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -105,7 +103,7 @@ import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceKind
 import com.music.bitchord.data.sources.SourceRegistry
-import com.music.bitchord.data.settings.AudioQuality
+import com.music.bitchord.data.settings.AudioTier
 import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.playback.DolbyAtmos
@@ -135,9 +133,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
 
-    val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
-    val cellularQuality by AppSettings.audioQualityCellular.collectAsStateWithLifecycle()
-    val metered by AppSettings.meteredConnection.collectAsStateWithLifecycle()
+    val audioTier by AppSettings.audioTier.collectAsStateWithLifecycle()
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val skipSilence by AppSettings.skipSilence.collectAsStateWithLifecycle()
@@ -156,20 +152,9 @@ fun SettingsScreen(
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
     val sourceOrder by AppSettings.sourceOrder.collectAsStateWithLifecycle()
-    val lossless by AppSettings.losslessAudio.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
-
-    // Lossless needs a module source — the only kind that can serve bit-exact
-    // audio from a streaming backend. The config is always seeded at startup
-    // (see SourceRegistry.init); what decides whether lossless can actually
-    // play is whether that module has a usable index URL (isComplete).
-    val moduleConfig = sourceConfigs.firstOrNull { it.kind == SourceKind.MODULE }
-    val losslessConfigured = moduleConfig != null
-    val moduleComplete = moduleConfig?.isComplete == true
-    // Whether the module source is currently enabled (toggle state).
-    val moduleEnabled = moduleConfig?.enabled == true && moduleComplete
 
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -183,7 +168,7 @@ fun SettingsScreen(
     val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
     val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
 
-    var picking by remember { mutableStateOf<QualityTarget?>(null) }
+    var showTierSheet by remember { mutableStateOf(false) }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
@@ -227,67 +212,23 @@ fun SettingsScreen(
             )
         }
 
+        // ponytail: single global tier replaces the old Wi-Fi/mobile split; the
+        // per-network flows are still kept in sync in AppSettings so the source
+        // resolver is unchanged. Re-add per-network tiers if data-plan budgeting
+        // on mobile is wanted again.
         SettingsGroup(
             header = "Audio quality",
-            footer = "Each connection keeps its own ceiling, so Wi-Fi can stay on " +
-                "High while mobile data is capped. High costs about " +
-                "${AudioQuality.HIGH.hourly} of data. The ceiling applies to every " +
-                "source, and outranks the lossless preference.",
+            footer = "Hi-Res and Lossless need a source that holds real files " +
+                "(a module or your library) — on YouTube they fall back to the " +
+                "best stream available. Picking a lossless tier is the lossless " +
+                "switch; there is no separate toggle.",
         ) {
             SettingsRow(
                 icon = Icons.Rounded.GraphicEq,
-                title = "Lossless / HQ Audio",
-                subtitle = if (!losslessConfigured) null else
-                    if (moduleEnabled) "Turn off if its playing a different version of the song or another song. Restart Required!"
-                    else if (moduleComplete) "Turn on to experience lossless music quality. Restart Required!"
-                    else "Add a module index URL in Sources to enable lossless audio.",
-                subtitleContent = if (!losslessConfigured) {
-                    {
-                        Text(
-                            text = "Lossless is not working — make sure the app is downloaded from the official source",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                } else null,
-                trailing = {
-                    Switch(
-                        checked = moduleEnabled,
-                        onCheckedChange = {
-                            if (losslessConfigured) {
-                                SourceRegistry.setModuleEnabled(it)
-                                AudioCache.clear {}
-                            }
-                        },
-                        enabled = moduleComplete,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = {
-                    if (moduleComplete) {
-                        SourceRegistry.setModuleEnabled(!moduleEnabled)
-                        AudioCache.clear {}
-                    }
-                },
-            )
-            RowDivider()
-            SettingsRow(
-                icon = Icons.Rounded.Wifi,
-                title = "On Wi-Fi",
-                badge = "In use".takeIf { metered == false },
-                value = wifiQuality.label,
-                onClick = { picking = QualityTarget.WIFI },
-            )
-            RowDivider()
-            SettingsRow(
-                icon = Icons.Rounded.SignalCellularAlt,
-                title = "On mobile data",
-                badge = "In use".takeIf { metered == true },
-                value = cellularQuality.label,
-                onClick = { picking = QualityTarget.CELLULAR },
+                title = "Audio quality",
+                subtitle = audioTier.detail,
+                value = audioTier.label,
+                onClick = { showTierSheet = true },
             )
         }
 
@@ -735,23 +676,16 @@ fun SettingsScreen(
         )
     }
 
-    picking?.let { target ->
+    if (showTierSheet) {
         ModalBottomSheet(
-            onDismissRequest = { picking = null },
+            onDismissRequest = { showTierSheet = false },
             containerColor = MaterialTheme.colorScheme.background,
         ) {
-            QualitySheet(
-                target = target,
-                selected = when (target) {
-                    QualityTarget.WIFI -> wifiQuality
-                    QualityTarget.CELLULAR -> cellularQuality
-                },
-                onSelect = { quality ->
-                    when (target) {
-                        QualityTarget.WIFI -> AppSettings.setAudioQualityWifi(quality)
-                        QualityTarget.CELLULAR -> AppSettings.setAudioQualityCellular(quality)
-                    }
-                    picking = null
+            TierSheet(
+                selected = audioTier,
+                onSelect = { tier ->
+                    AppSettings.setAudioTier(tier)
+                    showTierSheet = false
                 },
             )
         }
@@ -874,11 +808,7 @@ private fun moveSource(from: Int, up: Boolean) {
     AppSettings.setSourceOrder(list)
 }
 
-/** Which ceiling the open picker is editing. */
-private enum class QualityTarget(val title: String, val icon: ImageVector) {
-    WIFI("Wi-Fi", Icons.Rounded.Wifi),
-    CELLULAR("Mobile data", Icons.Rounded.SignalCellularAlt),
-}
+
 
 private fun openEqualizer(context: Context, sessionId: Int) {
     if (sessionId == 0) {
@@ -990,12 +920,11 @@ internal fun AccountCard(
     }
 }
 
-/** The quality options for one connection, with what each costs in data. */
+/** The four real tiers, with their descriptions — best first. */
 @Composable
-private fun QualitySheet(
-    target: QualityTarget,
-    selected: AudioQuality,
-    onSelect: (AudioQuality) -> Unit,
+private fun TierSheet(
+    selected: AudioTier,
+    onSelect: (AudioTier) -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
@@ -1004,7 +933,7 @@ private fun QualitySheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = target.icon,
+                imageVector = Icons.Rounded.GraphicEq,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.size(22.dp),
@@ -1017,7 +946,7 @@ private fun QualitySheet(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 Text(
-                    text = "While on ${target.title.lowercase()}",
+                    text = "Higher tiers use more data",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1026,26 +955,26 @@ private fun QualitySheet(
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
         // Best first — the option most people want shouldn't be last.
-        AudioQuality.entries.reversed().forEach { quality ->
-            val chosen = quality == selected
+        AudioTier.entries.forEach { tier ->
+            val chosen = tier == selected
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onSelect(quality)
+                        onSelect(tier)
                     }
                     .padding(horizontal = 22.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = quality.label,
+                        text = tier.label,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(
-                        text = "${quality.detail} · ${quality.hourly}",
+                        text = tier.detail,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
