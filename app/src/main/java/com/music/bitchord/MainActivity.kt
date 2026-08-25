@@ -406,7 +406,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
 
     val tabs = remember {
         listOf(
-            BottomTab("Play", BitChordIcons.Play),
+            BottomTab("Listen Now", BitChordIcons.Play),
             BottomTab("Explore", BitChordIcons.Explore),
             BottomTab("Library", BitChordIcons.Library),
             BottomTab("Search", BitChordIcons.Search),
@@ -932,9 +932,7 @@ private fun BitChordApp(darkTheme: Boolean, viewModel: MainViewModel = viewModel
                 showAccountScrobbling -> "Account & scrobbling"
                 showSettings -> "Settings"
                 detail != null -> detail.title
-                else -> tabs[selectedTab].let {
-                    if (it.label == "Play") "Listen Now" else it.label
-                }
+                else -> tabs[selectedTab].label
             },
             hazeState = hazeState,
             ownBackdrop = detail == null || isLocalDetail,

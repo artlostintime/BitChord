@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -37,6 +36,10 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.spotify.SpotifyClient
 import com.music.bitchord.data.spotify.SpotifyMapper
+import com.music.bitchord.ui.components.PAGE_GUTTER
+import com.music.bitchord.ui.components.SongRowSkeleton
+import com.music.bitchord.ui.components.MessageState
+import com.music.bitchord.ui.components.thumbnailBorder
 
 /**
  * Spotify recommendations: on open (with a valid sp_dc) it auto-loads the
@@ -175,12 +178,12 @@ fun SpotifyScreen(
     ) {
         item {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = PAGE_GUTTER, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     "Your Spotify Library",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     modifier = Modifier.weight(1f).padding(vertical = 12.dp),
                 )
                 TextButton(onClick = onSignOut) { Text("Sign out") }
@@ -191,35 +194,19 @@ fun SpotifyScreen(
         item {
             Text(
                 "Your Playlists",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, top = 8.dp, bottom = 4.dp),
             )
         }
         when {
             playlistsLoading -> item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    Text("Loading your playlists…", style = MaterialTheme.typography.bodySmall)
-                }
+                SongRowSkeleton()
             }
             playlistsError != null -> item {
-                Text(
-                    playlistsError!!,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(20.dp),
-                )
+                MessageState(message = playlistsError!!)
             }
             playlists.isEmpty() -> item {
-                Text(
-                    "No playlists found on this account.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(20.dp),
-                )
+                MessageState(message = "No playlists found on this account.")
             }
             else -> items(playlists.size, key = { playlists[it].id }) { index ->
                 val playlist = playlists[index]
@@ -227,7 +214,7 @@ fun SpotifyScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { openPlaylist(playlist) }
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                        .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -236,7 +223,7 @@ fun SpotifyScreen(
                             model = playlist.imageUrl,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).thumbnailBorder(RoundedCornerShape(6.dp)),
                         )
                     }
                     Column(Modifier.weight(1f)) {
@@ -256,12 +243,12 @@ fun SpotifyScreen(
         if (selectedPlaylist != null) {
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = PAGE_GUTTER, end = 8.dp, top = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         "Tracks · ${selectedPlaylist!!.name}",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.headlineMedium,
                         modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                     )
                     TextButton(onClick = {
@@ -273,35 +260,19 @@ fun SpotifyScreen(
             }
             when {
                 playlistLoading -> item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        Text("Resolving tracks…", style = MaterialTheme.typography.bodySmall)
-                    }
+                    SongRowSkeleton()
                 }
                 playlistError != null -> item {
-                    Text(
-                        playlistError!!,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(20.dp),
-                    )
+                    MessageState(message = playlistError!!)
                 }
                 playlistSongs == null || playlistSongs.isEmpty() -> item {
-                    Text(
-                        "No tracks resolved for this playlist.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(20.dp),
-                    )
+                    MessageState(message = "No tracks resolved for this playlist.")
                 }
                 else -> {
                     val resolved = playlistSongs!!
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_GUTTER),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -326,36 +297,25 @@ fun SpotifyScreen(
         item {
             Text(
                 "Liked from Spotify",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, top = 12.dp, bottom = 4.dp),
             )
         }
         when {
             likedLoading -> item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    Text("Matching your liked songs…", style = MaterialTheme.typography.bodySmall)
-                }
+                SongRowSkeleton()
             }
             likedError != null -> item {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    modifier = Modifier.fillMaxWidth().padding(PAGE_GUTTER),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(likedError!!, color = MaterialTheme.colorScheme.error)
+                    MessageState(message = likedError!!)
                     Button(onClick = onOpenLogin) { Text("Sign in again") }
                 }
             }
             songs.isEmpty() -> item {
-                Text(
-                    "No liked songs found on this account.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(20.dp),
-                )
+                MessageState(message = "No liked songs found on this account.")
             }
             else -> items(songs.size, key = { songs[it].videoId }) { index ->
                 SpotifyTrackRow(songs[index], onClick = { onPlay(songs, index) })
@@ -365,7 +325,7 @@ fun SpotifyScreen(
         // ---- Manual URL import (demoted secondary action) ----
         item {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_GUTTER, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("Or import a playlist by URL", style = MaterialTheme.typography.bodySmall)
@@ -429,7 +389,7 @@ private fun SpotifyTrackRow(song: Song, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -437,7 +397,7 @@ private fun SpotifyTrackRow(song: Song, onClick: () -> Unit) {
             model = song.artworkAt(160),
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).thumbnailBorder(RoundedCornerShape(6.dp)),
         )
         Column(Modifier.weight(1f)) {
             Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
