@@ -156,6 +156,16 @@ object AppSettings {
     /** Disk budget for cached audio. [AudioCache][com.music.bitchord.playback.AudioCache] evicts past it. */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
 
+    /**
+     * User's source priority, as an ordered list of [SourceConfig.id]s.
+     *
+     * Empty means "no preference" — [SourceRegistry.active] then falls back to
+     * the [SourceKind] ordinal order, the historical behaviour. Once the user
+     * reorders anything, the full list is stored here and drives every resolve,
+     * so provider priority in FR-2 is just this order read back.
+     */
+    val sourceOrder = MutableStateFlow<List<String>>(emptyList())
+
     // ── Scrobbling ──────────────────────────────────────────────────────
 
     /**
@@ -299,7 +309,8 @@ object AppSettings {
         animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
-        lyricsSources.value = readLyricsSources()
+            lyricsSources.value = readLyricsSources()
+        sourceOrder.value = readSourceOrder()
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
@@ -492,6 +503,12 @@ object AppSettings {
         prefs.edit().putString(KEY_LYRICS_SOURCES, value.joinToString(",") { it.name }).apply()
     }
 
+    /** Writes through to prefs as a comma-joined id list; an empty list restores ordinal order. */
+    fun setSourceOrder(value: List<String>) {
+        sourceOrder.value = value
+        prefs.edit().putString(KEY_SOURCE_ORDER, value.joinToString(",")).apply()
+    }
+
     /**
      * Stored as a joined list of names rather than a string set: a name that
      * no longer exists — a source dropped in a later build — has to fall out
@@ -505,6 +522,12 @@ object AppSettings {
         return stored.split(",")
             .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
             .toSet()
+    }
+
+    /** Empty when nothing stored — meaning "use the [SourceKind] ordinal order". */
+    private fun readSourceOrder(): List<String> {
+        val stored = prefs.getString(KEY_SOURCE_ORDER, null) ?: return emptyList()
+        return stored.split(",").filter { it.isNotBlank() }
     }
 
     fun setAnimatedCanvas(value: Boolean) {
@@ -692,6 +715,7 @@ object AppSettings {
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
+    private const val KEY_SOURCE_ORDER = "source_order"
 
     private const val KEY_LASTFM_ENABLED = "lastfm_enabled"
     private const val KEY_LASTFM_USERNAME = "lastfm_username"

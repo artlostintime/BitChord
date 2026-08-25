@@ -6,8 +6,10 @@ import android.net.Uri
 import android.util.Log
 import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.TrackLog
+import com.music.bitchord.data.settings.AppSettings
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlin.comparisons.compareBy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -60,6 +62,8 @@ object SourceRegistry {
 
     private lateinit var prefs: SharedPreferences
 
+    private lateinit var appContext: Context
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     /** Every configured source, enabled or not. */
@@ -75,6 +79,7 @@ object SourceRegistry {
     private var instances: Map<String, MusicSource> = emptyMap()
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = runCatching {
             EncryptedSharedPreferences.create(
                 context,
@@ -141,12 +146,31 @@ object SourceRegistry {
         }
     }
 
-    /** The enabled sources, module first and YouTube last, however they're stored. */
-    fun active(): List<MusicSource> =
-        configs.value
-            .filter { it.enabled && it.isComplete }
-            .sortedBy { it.kind.ordinal }
-            .mapNotNull { instances[it.id] }
+    /**
+     * The enabled sources, in the user's preferred order.
+     *
+     * [AppSettings.sourceOrder] holds an explicit id ordering once the user has
+     * reordered anything; an empty order falls back to the [SourceKind] ordinal,
+     * which is the historical "module first, YouTube last" behaviour. The order
+     * here is what [SourceResolver] scores on, so provider priority in FR-2 is
+     * just this list read back.
+     */
+    fun active(): List<MusicSource> = orderedConfigs()
+        .filter { it.enabled && it.isComplete }
+        .mapNotNull { instances[it.id] }
+
+    /**
+     * Every configured source (enabled or not) in display order: the user's
+     * stored order when set, else [SourceKind] ordinal. Used by the settings UI
+     * to list and reorder sources.
+     */
+    fun orderedConfigs(): List<SourceConfig> {
+        val order = AppSettings.sourceOrder.value
+        val rank = order.withIndex().associate { (i, id) -> id to i }
+        return configs.value.sortedWith(
+            compareBy({ rank[it.id] ?: Int.MAX_VALUE }, { it.kind.ordinal }),
+        )
+    }
 
     fun instance(configId: String): MusicSource? = instances[configId]
 
@@ -205,6 +229,7 @@ object SourceRegistry {
     private fun build(config: SourceConfig): MusicSource = when (config.kind) {
         SourceKind.MODULE -> ModuleSource(config)
         SourceKind.YOUTUBE -> YouTubeSource(config)
+        SourceKind.LOCAL -> LocalFilesSource(config, appContext)
     }
 
     /**
@@ -253,7 +278,7 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(SourceKind.YOUTUBE)
+    private val BUILT_IN_KINDS = listOf(SourceKind.YOUTUBE, SourceKind.LOCAL)
 
     private const val KEY_SOURCES = "sources"
     private const val PREFIX = "src:"

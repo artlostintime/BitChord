@@ -56,4 +56,24 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = false,
     ),
+
+    /**
+     * The device's own audio files and the app's downloads, played from disk.
+     *
+     * No network and no account, so it is always available offline, and a local
+     * FLAC is bit-exact — hence [canServeLossless] is true and a local lossless
+     * copy outranks a lossless request served lossy by another source. It needs
+     * no configuration, so like [YOUTUBE] it is seeded as a built-in and can
+     * only be disabled, not deleted. Placed last in the enum so the historical
+     * "module first, YouTube last" default order is preserved until the user
+     * reorders — see [SourceRegistry.active].
+     */
+    LOCAL(
+        label = "Local files",
+        detail = "Audio on this device and downloads, played straight from " +
+            "disk. Offline, and bit-exact when the file is a FLAC.",
+        labels = listOf("Offline", "Lossless", "No account"),
+        needsServer = false,
+        canServeLossless = true,
+    ),
 }

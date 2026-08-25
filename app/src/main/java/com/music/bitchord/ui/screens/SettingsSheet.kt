@@ -47,6 +47,8 @@ import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Waves
@@ -55,6 +57,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -274,6 +277,48 @@ fun SettingsScreen(
                 value = cellularQuality.label,
                 onClick = { picking = QualityTarget.CELLULAR },
             )
+        }
+
+        SettingsGroup(
+            header = "Sources",
+            footer = "Higher sources are tried first. Local files are offline " +
+                "and bit-exact for FLAC — move them up to prefer them over " +
+                "streaming. The order here is what BitChord uses to pick a source.",
+        ) {
+            val sources = SourceRegistry.orderedConfigs()
+            sources.forEachIndexed { index, cfg ->
+                val on = cfg.enabled && cfg.isComplete
+                SettingsRow(
+                    icon = when (cfg.kind) {
+                        SourceKind.LOCAL -> Icons.Rounded.Storage
+                        SourceKind.MODULE -> Icons.Rounded.Cloud
+                        SourceKind.YOUTUBE -> Icons.Rounded.Language
+                    },
+                    title = cfg.displayName,
+                    subtitle = cfg.kind.label,
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { moveSource(index, up = true) },
+                                enabled = index > 0,
+                            ) { Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up") }
+                            IconButton(
+                                onClick = { moveSource(index, up = false) },
+                                enabled = index < sources.lastIndex,
+                            ) { Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down") }
+                            Switch(
+                                checked = on,
+                                onCheckedChange = { SourceRegistry.setEnabled(cfg.id, it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        }
+                    },
+                )
+                if (index < sources.lastIndex) RowDivider()
+            }
         }
 
         SettingsGroup(header = "Playback") {
@@ -769,6 +814,15 @@ fun SettingsScreen(
             },
         )
     }
+}
+
+/** Swap a source with its neighbour in the user's order and persist it. */
+private fun moveSource(from: Int, up: Boolean) {
+    val list = SourceRegistry.orderedConfigs().map { it.id }.toMutableList()
+    val to = if (up) from - 1 else from + 1
+    if (to < 0 || to >= list.size) return
+    list[from] = list[to].also { list[to] = list[from] }
+    AppSettings.setSourceOrder(list)
 }
 
 /** Which ceiling the open picker is editing. */
