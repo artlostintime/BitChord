@@ -106,10 +106,10 @@ object NetworkQualityMonitor {
 
     /** Rough floor in kbps each class can sustain comfortably. */
     fun minKbpsFor(c: QualityClass): Long = when (c) {
-        QualityClass.VERY_SLOW -> 32
-        QualityClass.SLOW -> 96
-        QualityClass.MEDIUM -> 256
-        QualityClass.FAST -> 1_000
-        QualityClass.VERY_FAST -> 5_000
-    }.toLong().also { roundToLong(it.toFloat()) }
+        QualityClass.VERY_SLOW -> 32L
+        QualityClass.SLOW -> 96L
+        QualityClass.MEDIUM -> 256L
+        QualityClass.FAST -> 1_000L
+        QualityClass.VERY_FAST -> 5_000L
+    }
 }

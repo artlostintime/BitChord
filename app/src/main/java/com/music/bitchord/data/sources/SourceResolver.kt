@@ -65,7 +65,7 @@ object SourceResolver {
         // COMPRESSED tiers only. Lossless tiers are opt-in — they are never
         // selected automatically, so a data plan can't be silently drained.
         if (AppSettings.autoQuality.value) {
-            return when (NetworkQualityMonitor.effective.value) {
+            return when (com.music.bitchord.data.network.NetworkQualityMonitor.effective.value) {
                 com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.VERY_FAST,
                 com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.FAST,
                 -> StreamRequest.Best

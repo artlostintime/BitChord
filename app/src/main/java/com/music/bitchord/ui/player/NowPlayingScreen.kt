@@ -1287,7 +1287,7 @@ fun NowPlayingScreen(
                     ) {
                         Text(
                             text = annotated,
-                            style = nerdStyle,
+                            style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.65f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1296,7 +1296,7 @@ fun NowPlayingScreen(
                         )
                         Text(
                             text = if (autoOn) "Auto · ${effectiveTier.label}" else manualTier.label,
-                            style = nerdStyle,
+                            style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.65f),
                         )
                     }
