@@ -33,7 +33,7 @@ enum class AudioQuality(
      */
     TIER_HIGH(256, "High", "AAC 256 kbps", "112 MB/hr"),
     /**
-     * 32 kbps ceiling for [AudioTier.VERY_LOW]. Same reasoning as [TIER_HIGH]:
+     * Low ceilings follow the same reasoning as [TIER_HIGH]:
      * a distinct constant from [LOW] so the source resolver's lossless gating
      * and bit-exact checks stay untouched by the lowest tier.
      */
