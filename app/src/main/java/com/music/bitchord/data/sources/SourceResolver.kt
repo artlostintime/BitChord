@@ -509,7 +509,6 @@ object SourceResolver {
         // extension). Source rank no longer gates who gets asked.
         return active.any { it.kind != SourceKind.YOUTUBE }
     }
-    }
 
     /**
      * The sources ranked above [configId], in order.
