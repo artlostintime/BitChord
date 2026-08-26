@@ -103,6 +103,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -1294,6 +1296,8 @@ fun NowPlayingScreen(
             // tier list, another closes it. AUTO derives the tier from the
             // network monitor; lossless tiers are always manual-only.
             var showTierPicker by remember { mutableStateOf(false) }
+            // Back-press closes the picker before the screen itself dismisses.
+            BackHandler(enabled = showTierPicker) { showTierPicker = false }
             val autoOn by AppSettings.autoQuality.collectAsStateWithLifecycle()
             val manualTier by AppSettings.audioTier.collectAsStateWithLifecycle()
             val netClass by NetworkQualityMonitor.effective.collectAsStateWithLifecycle()
@@ -1309,89 +1313,104 @@ fun NowPlayingScreen(
                 val verdict = if (snap.isLossless) "Lossless" else "Lossy"
                 // Minimal: codec + verdict only. Full detail lives in Info.
                 val codec = snap.summaryLine()?.substringBefore(" · ") ?: return@let
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(GlassSurface)
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            showTierPicker = !showTierPicker
-                        }
-                        .padding(horizontal = PLAYER_GUTTER, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = "$codec · $verdict",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = GlassSecondaryAlpha),
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = if (autoOn) "Auto" else manualTier.label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (snap.isLossless) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassSecondaryAlpha),
-                    )
-                }
-            }
-            AnimatedVisibility(visible = showTierPicker) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(GlassPanel)
-                                .padding(vertical = 4.dp),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        AppSettings.setAutoQuality(true)
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                            ) {
-                                Text(
-                                    text = "Auto",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (autoOn) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (autoOn) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    text = effectiveTier.label,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = GlassSecondaryAlpha),
-                                )
+                // Anchor box for the tier picker popup: the popup aligns to its
+                // bottom edge so it opens upward, directly above this row.
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(GlassSurface)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showTierPicker = !showTierPicker
                             }
-                            AudioTier.entries.forEach { tier ->
-                                Row(
+                            .padding(horizontal = PLAYER_GUTTER, vertical = 8.dp),
+                    ) {
+                        Text(
+                            text = "$codec · $verdict",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = if (autoOn) "Auto" else manualTier.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (snap.isLossless) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassSecondaryAlpha),
+                        )
+                    }
+                    if (showTierPicker) {
+                        // focusable = true gives free outside-tap dismissal: any
+                        // tap outside the popup (the stats row included) routes
+                        // here and closes it. The row's own clickable only fires
+                        // while the popup is closed, so the two never race.
+                        Popup(
+                            alignment = Alignment.BottomStart,
+                            onDismissRequest = { showTierPicker = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            AnimatedVisibility(visible = true) {
+                                Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            AppSettings.setAutoQuality(false)
-                                            AppSettings.setAudioTier(tier)
-                                        }
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        .width(PLAYER_MAX_WIDTH)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(GlassPanel)
+                                        .padding(vertical = 4.dp),
                                 ) {
-                                    Text(
-                                        text = tier.label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (!autoOn && manualTier == tier) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (!autoOn && manualTier == tier) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Text(
-                                        text = tier.detail,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color.White.copy(alpha = GlassSecondaryAlpha),
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                AppSettings.setAutoQuality(true)
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(
+                                            text = "Auto",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (autoOn) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (autoOn) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Text(
+                                            text = effectiveTier.label,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
+                                        )
+                                    }
+                                    AudioTier.entries.forEach { tier ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    AppSettings.setAutoQuality(false)
+                                                    AppSettings.setAudioTier(tier)
+                                                }
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        ) {
+                                            Text(
+                                                text = tier.label,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (!autoOn && manualTier == tier) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (!autoOn && manualTier == tier) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Text(
+                                                text = tier.detail,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = GlassSecondaryAlpha),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
             }
             val losslessOn by AppSettings.losslessAudio.collectAsStateWithLifecycle()
             val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
