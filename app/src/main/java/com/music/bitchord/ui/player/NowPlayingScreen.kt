@@ -22,6 +22,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -292,7 +293,7 @@ private val GLOW_ROOM = 10.dp
 /** Background tint for compact glass surfaces (stats row, pills, glyphs). */
 private val GlassSurface = Color.Black.copy(alpha = 0.28f)
 /** Background tint for expanded glass panels (quality selector dropdown). */
-private val GlassPanel = Color.Black.copy(alpha = 0.35f)
+private val GlassPanel = Color.Black.copy(alpha = 0.58f)
 /** Primary text on glass surfaces — crisp but not glaring. */
 private const val GlassTextAlpha = 0.90f
 /** Secondary / label text on glass surfaces. */
@@ -1354,8 +1355,14 @@ fun NowPlayingScreen(
                                 Column(
                                     modifier = Modifier
                                         .width(PLAYER_MAX_WIDTH)
+                                        .shadow(8.dp, RoundedCornerShape(12.dp))
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(GlassPanel)
+                                        .border(
+                                            1.dp,
+                                            Color.White.copy(alpha = 0.22f),
+                                            RoundedCornerShape(12.dp),
+                                        )
                                         .padding(vertical = 4.dp),
                                 ) {
                                     Row(

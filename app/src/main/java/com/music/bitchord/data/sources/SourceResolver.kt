@@ -152,15 +152,22 @@ object SourceResolver {
             matchAndStream(source, target, request)?.let { candidates.add(source to it) }
         }
         if (candidates.isEmpty()) return null
-        val ranked = candidates.map { (src, stream) ->
+        val scored = candidates.map { (src, stream) ->
             val rankIndex = active.indexOfFirst { it.configId == src.configId }
                 .let { if (it < 0) active.size else it }
             val base = score(src, stream, target, request, rankIndex, active.size)
             // The pinned source keeps a sticky edge so it isn't displaced by a
             // marginally higher-ranked one — only by a genuinely better pick.
             val withPin = if (src.configId == pinned?.configId) base + PINNED_BONUS else base
-            stream to withPin
-        }.sortedByDescending { it.second }.map { it.first }
+            Triple(src, stream, withPin)
+        }
+        scored.forEach { (src, stream, sc) ->
+            TrackLog.d(
+                TAG,
+                "resolve candidate: ${stream.sourceLabel} score=$sc format=${stream.format.summary}",
+            )
+        }
+        val ranked = scored.sortedByDescending { it.third }.map { it.second }
         val best = ranked.first()
         // The rest are the automatic fallback chain if [best] fails to open — see
         // [takeFallback] and [markFailed].
@@ -195,7 +202,15 @@ object SourceResolver {
         // lossless was asked for this includes lossless-capable sources the
         // user hasn't reordered above YouTube (see [substitutionSources]).
         val ranked = rankedCandidates(target, request, substitutionSources(active))
-        val best = ranked.firstOrNull() ?: return null
+        TrackLog.d(
+            TAG,
+            "substituteForYouTube '${target.title}' request=$request: ${ranked.size} ranked candidate(s) — " +
+                ranked.joinToString { "${it.sourceLabel}@${it.format.summary}" },
+        )
+        val best = ranked.firstOrNull() ?: run {
+            TrackLog.d(TAG, "substituteForYouTube '${target.title}': no candidate beat YouTube")
+            return null
+        }
         // Says what was found, not what the caller will do with it. This line
         // used to read "substituted" unconditionally, including for streams the
         // caller went on to refuse — which made a log of a track that played on
@@ -463,6 +478,9 @@ object SourceResolver {
                 .let { if (it < 0) active.size else it }
             scored.add(stream to score(source, stream, target, request, rankIndex, active.size))
         }
+        scored.forEach { (s, sc) ->
+            TrackLog.d(TAG, "rankedCandidates: ${s.sourceLabel} score=$sc ${s.format.summary} (request=$request)")
+        }
         return scored.sortedByDescending { it.second }.map { it.first }
     }
 
@@ -507,7 +525,14 @@ object SourceResolver {
         // health), so YouTube still wins when it genuinely should (e.g.
         // Capped(64) makes Opus 50 the right pick over a capped-out
         // extension). Source rank no longer gates who gets asked.
-        return active.any { it.kind != SourceKind.YOUTUBE }
+        val nonYt = active.filter { it.kind != SourceKind.YOUTUBE }
+        val result = nonYt.isNotEmpty()
+        TrackLog.d(
+            TAG,
+            "canSubstituteForYouTube: $result (${nonYt.size} non-YT of ${active.size} active) — " +
+                nonYt.joinToString { "${it.displayName}(${it.kind})" },
+        )
+        return result
     }
 
     /**
@@ -535,7 +560,13 @@ object SourceResolver {
      * itself.
      */
     private fun substitutionSources(active: List<MusicSource>): List<MusicSource> {
-        return active.filter { it.kind != SourceKind.YOUTUBE }
+        val list = active.filter { it.kind != SourceKind.YOUTUBE }
+        TrackLog.d(
+            TAG,
+            "substitutionSources: ${list.size} candidate source(s) for YouTube substitution — " +
+                list.joinToString { "${it.displayName}(${it.kind})" },
+        )
+        return list
     }
 
     /**
@@ -566,10 +597,20 @@ object SourceResolver {
         waitForAll: Boolean = false,
         strictLength: Boolean = false,
     ): SourceStream? {
-        for (query in TrackMatcher.queries(target)) {
+        val queries = TrackMatcher.queries(target)
+        TrackLog.d(
+            TAG,
+            "${source.displayName}: matchAndStream '${target.title}' request=$request " +
+                "waitForAll=$waitForAll strictLength=$strictLength",
+        )
+        for (query in queries) {
             val candidates = attempt(source) {
                 source.search(query, limit = MATCH_CANDIDATES, waitForAll = waitForAll)
-            } ?: return null
+            } ?: run {
+                TrackLog.d(TAG, "${source.displayName}: search threw for query '$query'")
+                return null
+            }
+            TrackLog.d(TAG, "${source.displayName}: query '$query' → ${candidates.size} raw result(s)")
             var matches = TrackMatcher.ranked(candidates, target)
             // The extra bar for standing in for one specific recording: the
             // replacement has to be the same *length*, to the second or so. A
@@ -580,9 +621,19 @@ object SourceResolver {
             if (strictLength) {
                 matches = matches.filter { TrackMatcher.withinSeconds(it, target, UPGRADE_DRIFT_SEC) }
             }
+            TrackLog.d(
+                TAG,
+                "${source.displayName}: ${matches.size} match(es) after ranking" +
+                    if (strictLength) " (strict length)" else "",
+            )
             if (matches.isEmpty()) continue
             return streamBest(source, matches, target, request)
         }
+        TrackLog.d(
+            TAG,
+            "${source.displayName}: no acceptable match for '${target.title}' across ${queries.size} " +
+                "query(ies) request=$request",
+        )
         return null
     }
 
@@ -652,6 +703,10 @@ object SourceResolver {
     ): SourceStream? {
         val wantsLossless = request is StreamRequest.Lossless
         val ordered = preferred(matches, target, wantsLossless)
+        TrackLog.d(
+            TAG,
+            "${source.displayName}: streamBest ${ordered.size} match(es), wantsLossless=$wantsLossless request=$request",
+        )
         var settleFor: SourceStream? = null
         for (match in ordered.take(STREAM_ATTEMPTS)) {
             val trackId = SourceRegistry.parseTrackKey(match.videoId)?.second ?: match.videoId
@@ -671,14 +726,21 @@ object SourceResolver {
                 confidence = TrackMatcher.score(match, target),
             )
             val served = stream.format
+            val q = qualityTier(stream, request)
             if (!wantsLossless || served.isLossless == true || served.statesNothingLossy) {
                 TrackLog.d(
                     TAG,
-                    "${source.displayName} matched '${match.title}' by '${match.artist}' → ${served.summary}",
+                    "${source.displayName} ACCEPT '${match.title}' by '${match.artist}' → " +
+                        "${served.summary} (score=$q, lossless=${served.isLossless}, " +
+                        "belowRequest=${stream.belowRequest}, request=$request)",
                 )
                 return stream
             }
-            TrackLog.d(TAG, "${source.displayName} offered ${served.summary} for '${match.title}'; looking further")
+            TrackLog.d(
+                TAG,
+                "${source.displayName} REJECT '${match.title}' ${served.summary} (score=$q) — " +
+                    "lossless requested but stream is not lossless (request=$request)",
+            )
             // The floor is the *best* of what was refused, not the first of
             // it. These arrive in match order, which has nothing to do with
             // quality: a 320kbps AAC and a 128kbps MP3 are both rejections,
@@ -687,6 +749,15 @@ object SourceResolver {
             // first.
             settleFor = betterOf(settleFor, stream.copy(belowRequest = true))
         }
+        TrackLog.d(
+            TAG,
+            "${source.displayName} streamBest result: " +
+                if (settleFor != null) {
+                    "settleFor ${settleFor.format.summary} (belowRequest, request=$request)"
+                } else {
+                    "no stream (request=$request)"
+                },
+        )
         return settleFor
     }
 

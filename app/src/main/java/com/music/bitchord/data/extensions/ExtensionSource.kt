@@ -100,7 +100,23 @@ class ExtensionSource(
                 return@withContext emptyList()
             }
             val tracks = runCatching { json.decodeFromString<List<ExtensionTrack>>(raw) }
-                .getOrElse { emptyList() }
+                .getOrElse {
+                    // Many provider APIs nest the list under a key (tracks/results/
+                    // data/items) instead of returning it bare; try those before
+                    // giving up. A bare non-array (or a type mismatch) is logged so a
+                    // silent empty search — which would otherwise let YouTube win with
+                    // no trace — is visible.
+                    val fromWrapper = extractTrackList(raw)
+                    if (fromWrapper == null) {
+                        TrackLog.w(
+                            TAG,
+                            "$displayName: search JSON decode failed — ${it.message} (raw=${raw.take(200)})",
+                        )
+                    } else {
+                        TrackLog.d(TAG, "$displayName: search recovered ${fromWrapper.size} track(s) from wrapped JSON")
+                    }
+                    fromWrapper ?: emptyList()
+                }
             tracks.take(limit).map { t ->
                 Song(
                     videoId = SourceRegistry.trackKey(config.id, t.id),
@@ -131,7 +147,10 @@ class ExtensionSource(
                 TrackLog.w(TAG, "$displayName: stream failed for $trackId — ${it.message}")
                 return@withContext null
             }
-            if (url.isBlank()) return@withContext null
+            if (url.isBlank()) {
+                TrackLog.w(TAG, "$displayName: stream returned blank url for $trackId (capture failed)")
+                return@withContext null
+            }
             // Tidal-style extensions return a DASH/BTS manifest (base64 MPD or
             // JSON {urls:[...]}), not a playable URL. Rewrite it to a local
             // DASH playlist ExoPlayer can open — see [resolveManifest].
@@ -249,6 +268,28 @@ $segList      </Representation>
         url.substringBefore('?').substringAfterLast('.').lowercase()
             .takeIf { it in AUDIO_EXTENSIONS }
 
+    /**
+     * Recovers a track list from a provider response that wraps it under a
+     * common key instead of returning the array bare — see [search]. Returns
+     * null when [raw] isn't a JSON object or holds no recognised list, so the
+     * caller still logs the original decode failure rather than masking it.
+     */
+    private fun extractTrackList(raw: String): List<ExtensionTrack>? {
+        val t = raw.trim()
+        if (!t.startsWith("{")) return null
+        return runCatching {
+            val obj = JSONObject(t)
+            for (key in listOf("tracks", "results", "data", "items", "list", "track_list", "song_list")) {
+                val arr = obj.optJSONArray(key) ?: continue
+                val decoded = runCatching {
+                    json.decodeFromString<List<ExtensionTrack>>(arr.toString())
+                }.getOrNull()
+                if (!decoded.isNullOrEmpty()) return decoded
+            }
+            null
+        }.getOrNull()
+    }
+
     private companion object {
         const val TAG = "BitChord"
         val LOSSLESS_HINTS = listOf("LOSSLESS", "FLAC", "ALAC", "HI-RES", "HI_RES", "HIRES", "24-BIT", "16-BIT", "WAV")
@@ -353,7 +394,16 @@ internal object ExtensionJs {
                     "})();",
             )
             val raw = qjs.evaluate<String>("__ext_res")
+            if (raw.isBlank() || raw == "undefined") {
+                // The async IIFE didn't populate __ext_res — searchTracks hung
+                // past the caller's timeout or returned nothing. Without this the
+                // extension silently yields an empty search and YouTube wins with
+                // no trace of why.
+                TrackLog.w(TAG, "search($extId): no result resolved (raw='$raw') — searchTracks may not return a promise")
+                throw IllegalStateException("$extId search returned no result")
+            }
             if (raw.startsWith("{") && raw.contains("\"error\"")) {
+                TrackLog.w(TAG, "search($extId): ${parseError(raw)}")
                 throw IllegalStateException(parseError(raw))
             }
             raw
@@ -368,22 +418,33 @@ internal object ExtensionJs {
         withContext(Dispatchers.Default) {
             val qjs = engines[extId] ?: return@withContext Result.failure(IllegalStateException("$extId not loaded"))
             runCatching {
+                // Clear the capture global first so a stale URL from a previous
+                // call can't be mistaken for this one's result.
+                qjs.evaluate<Unit>("globalThis.__ext_capture_url = undefined;")
                 qjs.evaluate<Unit>(
                     "var __ext_dl_res = undefined;" +
                         "(async function(){" +
-                        "  try { __ext_dl_res = JSON.stringify(await globalThis.__ext.download(" +
-                        "    ${JSONObject.quote(trackId)}, ${JSONObject.quote(quality)}, '$CAPTURE', null)); }" +
+                        "  try { var r = await globalThis.__ext.download(" +
+                        "    ${JSONObject.quote(trackId)}, ${JSONObject.quote(quality)}, '$CAPTURE', null);" +
+                        "    __ext_dl_res = JSON.stringify(r || globalThis.__ext_capture_url || ''); }" +
                         "  catch(e){ __ext_dl_res = JSON.stringify({error: e && e.message ? e.message : String(e)}); }" +
                         "})();",
                 )
                 val raw = qjs.evaluate<String>("__ext_dl_res")
                 if (raw.isBlank() || raw == "undefined") {
+                    TrackLog.w(TAG, "captureStreamUrl($extId): download returned no stream url (raw='$raw')")
                     throw IllegalStateException("extension download returned no stream url")
                 }
                 if (raw.startsWith("{") && raw.contains("\"error\"")) {
+                    TrackLog.w(TAG, "captureStreamUrl($extId): ${parseError(raw)}")
                     throw IllegalStateException(parseError(raw))
                 }
-                extractUrl(raw)
+                val url = extractUrl(raw)
+                if (url.isBlank()) {
+                    TrackLog.w(TAG, "captureStreamUrl($extId): extracted blank url from '$raw'")
+                    throw IllegalStateException("extension download returned no stream url")
+                }
+                url
             }
         }
 
@@ -460,9 +521,12 @@ internal object ExtensionJs {
                     checkHost(url, extId)
                     val finalUrl = resolveFinalUrl(url)
                     if (path == CAPTURE) {
-                        // Stream-capture mode: hand the URL back instead of writing.
-                        // The extension's download() is expected to return this so
-                        // captureStreamUrl can read it without re-entering the VM.
+                        // Stream-capture mode: stash the resolved URL in a global so
+                        // captureStreamUrl can recover it even when the extension's
+                        // download() returns nothing (many implementations call
+                        // file.download for its side effect and return undefined).
+                        // The return value still covers extensions that do return it.
+                        qjs.evaluate<Unit>("globalThis.__ext_capture_url = ${JSONObject.quote(finalUrl)}")
                         return finalUrl
                     }
                     downloadToFile(finalUrl, path)
