@@ -43,6 +43,7 @@ import com.music.bitchord.R
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.RecommendationSource
+import com.music.bitchord.data.settings.UiMode
 import kotlin.math.roundToInt
 
 @Composable
@@ -72,6 +73,8 @@ fun AccountAndScrobblingScreen(
     val discordToken by AppSettings.discordToken.collectAsStateWithLifecycle()
     val discordUsername by AppSettings.discordUsername.collectAsStateWithLifecycle()
     val discordRpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
+    val uiMode by AppSettings.uiMode.collectAsStateWithLifecycle()
+    val advanced = uiMode == UiMode.ADVANCED
 
     Column(
         modifier = modifier
@@ -197,7 +200,7 @@ fun AccountAndScrobblingScreen(
                         }
                     },
                 )
-                if (lastfmEnabled && lastfmSessionKey.isNotBlank()) {
+                if (lastfmEnabled && lastfmSessionKey.isNotBlank() && advanced) {
                     RowDivider()
                     SettingsRow(
                         icon = Icons.Rounded.GraphicEq,
@@ -235,7 +238,7 @@ fun AccountAndScrobblingScreen(
                 }
             }
 
-            if (lastfmEnabled && lastfmSessionKey.isNotBlank()) {
+            if (lastfmEnabled && lastfmSessionKey.isNotBlank() && advanced) {
                 SettingsGroup(header = "Scrobble timing") {
                     SliderRow(
                         icon = Icons.Rounded.Tune,

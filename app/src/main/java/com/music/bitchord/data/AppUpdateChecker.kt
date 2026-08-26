@@ -1,6 +1,7 @@
 package com.music.bitchord.data
 
 import com.music.bitchord.BuildConfig
+import com.music.bitchord.data.TrackLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,17 +32,33 @@ object AppUpdateChecker {
 
     suspend fun check() = withContext(Dispatchers.IO) {
         runCatching {
-            val request = Request.Builder().url(LATEST_RELEASE_URL).build()
+            TrackLog.d("AppUpdateChecker", "checking $LATEST_RELEASE_URL")
+            // GitHub's API rejects unauthenticated requests with no User-Agent
+            // (HTTP 403), which is why updates never surfaced before.
+            val request = Request.Builder()
+                .url(LATEST_RELEASE_URL)
+                .header("User-Agent", "BitChord")
+                .build()
             val body = Http.client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) null else response.body?.string()
+                TrackLog.d("AppUpdateChecker", "latest-release HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    TrackLog.w("AppUpdateChecker", "update check failed: HTTP ${response.code}")
+                    return@runCatching
+                }
+                response.body?.string()
             } ?: return@runCatching
             val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
             val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
             val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
             val latest = tag.removePrefix("v")
-            if (isNewer(latest, BuildConfig.VERSION_NAME)) {
+            TrackLog.d("AppUpdateChecker", "latest tag=$latest current=${BuildConfig.VERSION_NAME}")
+            val newer = isNewer(latest, BuildConfig.VERSION_NAME)
+            TrackLog.d("AppUpdateChecker", "isNewer=$newer")
+            if (newer) {
                 _available.value = UpdateInfo(latest, url)
             }
+        }.onFailure {
+            TrackLog.w("AppUpdateChecker", "update check threw: ${it.message}")
         }
     }
 

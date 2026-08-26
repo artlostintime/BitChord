@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import com.music.bitchord.data.TrackLog
 import okhttp3.MediaType.Companion.toMediaType
@@ -396,16 +397,54 @@ object SpotifyClient {
             val uri = wrapper["_uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
                 ?: pl["uri"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
                 ?: return@mapNotNull null
+            // Tolerant name extraction: try the obvious spots, then walk the
+            // wrapper recursively for the first "name" string as a last resort
+            // (Spotify has surfaced playlists whose name sits one level deeper
+            // than the parser expected). Log the raw item once when even that
+            // fails, so the next shape drift is diagnosable.
+            val name = pl["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: wrapper["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+                ?: findFirstString(itemElem, "name")
+                ?: ""
+            if (name.isBlank()) {
+                TrackLog.w(
+                    "SpotifyClient",
+                    "parsePlaylists: empty name for uri=$uri; raw=${itemElem.toString().take(400)}",
+                )
+            }
             SpotifyPlaylist(
                 id = uri.removePrefix("spotify:playlist:"),
-                name = pl["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
-                    ?: wrapper["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
-                    ?: "",
+                name = name,
                 trackCount = pl["tracks"]?.takeIf { it !is JsonNull }?.jsonObject
                     ?.get("totalCount")?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
                     ?.toIntOrNull() ?: 0,
                 imageUrl = parsePlaylistImage(pl),
             )
+        }
+        }
+
+    /**
+     * Recursively searches [element] for the first string value keyed "name".
+     * Used as a last-resort fallback when a playlist's name isn't where the
+     * parser expects — Spotify's GQL shape drifts between account types.
+     */
+    private fun findFirstString(element: JsonElement, key: String): String? {
+        return when (element) {
+            is JsonObject -> {
+                element[key]?.let { v ->
+                    if (v is JsonPrimitive && v.isString) return v.content
+                }
+                for ((k, v) in element) {
+                    if (k == key) continue
+                    findFirstString(v, key)?.let { return it }
+                }
+                null
+            }
+            is JsonArray -> {
+                for (v in element) findFirstString(v, key)?.let { return it }
+                null
+            }
+            else -> null
         }
     }
 

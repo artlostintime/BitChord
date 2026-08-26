@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -129,6 +130,8 @@ fun SettingsScreen(
     onAccountScrobbling: () -> Unit,
     onLyricsSources: () -> Unit,
     onExtensions: () -> Unit,
+    onImportSpotifyUrl: (String) -> Unit = {},
+    onExportLikedSongs: () -> Unit = {},
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -175,6 +178,7 @@ fun SettingsScreen(
     var showTierSheet by remember { mutableStateOf(false) }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
     val scrobbleScope = rememberCoroutineScope()
     val updateScope = rememberCoroutineScope()
