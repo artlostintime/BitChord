@@ -28,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -179,6 +180,13 @@ object AudioCache {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /**
+     * Analysis-head fetches live here rather than in [scope] so a cache
+     * clear can cancel them — otherwise an in-flight head write re-creates
+     * spans after the wipe and clear() silently fails to fully wipe.
+     */
+    private val analysisScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
      * Kept in the app's cache directory: this is disposable by definition, and
      * that is where the system and the "clear cache" button expect to reclaim
      * it from. [SimpleCache] copes with files disappearing underneath it by
@@ -205,6 +213,7 @@ object AudioCache {
     /** Drops everything on disk. The listener asked; no grace period. */
     fun clear(onComplete: () -> Unit = {}) {
         cancel()
+        analysisScope.coroutineContext.cancelChildren()
         scope.launch {
             cache.keys.toList().forEach { cache.removeResource(it) }
             withContext(Dispatchers.Main) { onComplete() }
@@ -581,6 +590,11 @@ object AudioCache {
 
     suspend fun warmRange(uri: Uri, position: Long, length: Long) {
         val key = keyFactory.buildCacheKey(DataSpec(uri))
+        // An upgrade warms a NEW rendition under this key: any bytes already
+        // cached here belong to a different stream (see the keyFactory doc)
+        // and must go first, or the fetch skips them and splices two sources
+        // into one corrupt file.
+        runCatching { cache.removeResource(key) }
         fetch(key, uri, position, length)
     }
 
@@ -660,6 +674,9 @@ object AudioCache {
         // One round per track per session, and it is sized correctly up front
         // rather than grown into. See [analysisHeadSize] for why growing it was
         // the wrong shape.
+        // Bounded: a very long session would otherwise grow this without
+        // limit. Clearing only forces one extra fetch per track — harmless.
+        if (analysisHeads.size >= 500) analysisHeads.clear()
         if (analysisHeads.putIfAbsent(videoId, true) != null) return
         // Checked before the round is claimed, so the playback thread pays a set
         // lookup per tick rather than queueing coroutines four times a second on
@@ -882,6 +899,9 @@ object AudioCache {
         }
         val keys = cache.keys.filter { it == videoId || it.startsWith("$videoId#") }
         renditionKeys[videoId] = now to keys
+        if (renditionKeys.size > 500) {
+            renditionKeys.entries.removeIf { now - it.value.first >= RENDITION_KEYS_TTL_MS }
+        }
         return keys
     }
 
