@@ -502,19 +502,13 @@ object SourceResolver {
      */
     fun canSubstituteForYouTube(): Boolean {
         val active = SourceRegistry.active()
-        // A source ranked above YouTube can always stand in for it.
-        if (active.indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0) return true
-        // Lossless was asked for: a lossless-capable source the user hasn't
-        // reordered above YouTube still beats YouTube's lossy Opus, so it is
-        // worth offering around. Without this, installing a Qobuz/Tidal
-        // extension or enabling Offline Mode and turning lossless on did
-        // nothing — those kinds sit below YouTube in the default
-        // [SourceKind] ordinal order, so the plain YouTube path was taken and
-        // the source was never consulted.
-        if (requestForNow() is StreamRequest.Lossless) {
-            return active.any { it.kind.canServeLossless }
-        }
-        return false
+        // Quality-first: ANY enabled alternative source competes on every
+        // resolve — score() decides the winner (lossless bonus, bitrate,
+        // health), so YouTube still wins when it genuinely should (e.g.
+        // Capped(64) makes Opus 50 the right pick over a capped-out
+        // extension). Source rank no longer gates who gets asked.
+        return active.any { it.kind != SourceKind.YOUTUBE }
+    }
     }
 
     /**
