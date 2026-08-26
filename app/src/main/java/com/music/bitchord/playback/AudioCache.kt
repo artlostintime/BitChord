@@ -444,6 +444,9 @@ object AudioCache {
      * of skips only wherever the listener actually lands is worth chasing.
      */
     fun prefetchQueue(mediaIds: List<String>) {
+        // Whole-track prefetches are a bandwidth optimization, not a
+        // requirement — never spend the listener's mobile data on them.
+        if (AppSettings.meteredConnection.value == true) return
         if (mediaIds == pendingQueue) return
         pendingQueue = mediaIds
         job?.cancel()
