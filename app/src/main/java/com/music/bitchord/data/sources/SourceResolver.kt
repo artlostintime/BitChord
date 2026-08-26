@@ -190,9 +190,11 @@ object SourceResolver {
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val request = requestForNow()
-        // Score every source ranked above YouTube and take the best, rather than
-        // the first that happens to match — see [score].
-        val ranked = rankedCandidates(target, request, rankedAbove(youtube.configId, active))
+        // Score every source worth standing in for YouTube and take the best,
+        // rather than the first that happens to match — see [score]. When
+        // lossless was asked for this includes lossless-capable sources the
+        // user hasn't reordered above YouTube (see [substitutionSources]).
+        val ranked = rankedCandidates(target, request, substitutionSources(active, request))
         val best = ranked.firstOrNull() ?: return null
         // Says what was found, not what the caller will do with it. This line
         // used to read "substituted" unconditionally, including for streams the
@@ -277,7 +279,7 @@ object SourceResolver {
         if (request !is StreamRequest.Lossless) return null
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
-        for (source in rankedAbove(youtube.configId, active)) {
+        for (source in substitutionSources(active, request)) {
             if (!source.kind.canServeLossless) continue
             val stream = matchAndStream(
                 source, target, request, waitForAll = true, strictLength = true,
@@ -343,7 +345,7 @@ object SourceResolver {
         // an absent YouTube means everything enabled outranks it, which is
         // already what [rankedAbove] says about a config that isn't in the list.
         val youtubeId = active.firstOrNull { it.kind == SourceKind.YOUTUBE }?.configId
-        for (source in rankedAbove(youtubeId.orEmpty(), active)) {
+        for (source in substitutionSources(active, StreamRequest.Lossless)) {
             if (!source.kind.canServeLossless) continue
             val stream = matchAndStream(
                 source,
@@ -494,8 +496,22 @@ object SourceResolver {
      * [AudioCache][com.music.bitchord.playback.AudioCache] decide how to treat
      * a YouTube id before anyone has asked a source for it.
      */
-    fun canSubstituteForYouTube(): Boolean =
-        SourceRegistry.active().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
+    fun canSubstituteForYouTube(): Boolean {
+        val active = SourceRegistry.active()
+        // A source ranked above YouTube can always stand in for it.
+        if (active.indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0) return true
+        // Lossless was asked for: a lossless-capable source the user hasn't
+        // reordered above YouTube still beats YouTube's lossy Opus, so it is
+        // worth offering around. Without this, installing a Qobuz/Tidal
+        // extension or enabling Offline Mode and turning lossless on did
+        // nothing — those kinds sit below YouTube in the default
+        // [SourceKind] ordinal order, so the plain YouTube path was taken and
+        // the source was never consulted.
+        if (requestForNow() is StreamRequest.Lossless) {
+            return active.any { it.kind.canServeLossless }
+        }
+        return false
+    }
 
     /**
      * The sources ranked above [configId], in order.
@@ -507,6 +523,26 @@ object SourceResolver {
         active.indexOfFirst { it.configId == configId }
             .let { if (it < 0) active.size else it }
             .let { active.take(it) }
+
+    /**
+     * Sources worth asking to stand in for YouTube, in priority order.
+     *
+     * Normally only those the user ranked above YouTube — see [rankedAbove].
+     * But when lossless was asked for, a lossless-capable source the user
+     * hasn't reordered above YouTube still beats YouTube's lossy Opus, so it
+     * is appended. Without this, installing a Qobuz/Tidal extension or
+     * enabling Offline Mode and turning lossless on did nothing: those kinds
+     * sit below YouTube in the default [SourceKind] ordinal order, so they
+     * were never consulted and every track fell through to YouTube Opus.
+     */
+    private fun substitutionSources(active: List<MusicSource>, request: StreamRequest): List<MusicSource> {
+        val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return emptyList()
+        val above = rankedAbove(youtube.configId, active)
+        if (request !is StreamRequest.Lossless) return above
+        val aboveIds = above.map { it.configId }.toSet()
+        val losslessElsewhere = active.filter { it.kind.canServeLossless && it.configId !in aboveIds }
+        return above + losslessElsewhere
+    }
 
     /**
      * Searches [source] for the recording in [target] and streams it if one of
