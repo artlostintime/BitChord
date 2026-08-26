@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -112,6 +113,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -149,6 +152,9 @@ import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.NerdStats
+import com.music.bitchord.data.codecLabel
+import com.music.bitchord.data.network.NetworkQualityMonitor
+import com.music.bitchord.data.settings.AudioTier
 import com.music.bitchord.data.canvas.CanvasArtwork
 import com.music.bitchord.data.canvas.CanvasRepository
 import com.music.bitchord.data.lyrics.LyricLine
@@ -1028,41 +1034,6 @@ fun NowPlayingScreen(
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .graphicsLayer { alpha = 1f - p * 2f },
                         ) {
-                            // One clean line: codec · quality · verdict,
-                            // Apple-Music-style. Secondary detail (source,
-                            // Automix) dropped from the main view; the full
-                            // breakdown lives in the Info sheet.
-                            nerdStats?.let { snap ->
-                                snap.summaryLine()?.let { summary ->
-                                    val verdict = if (snap.isLossless) "Lossless" else "Lossy"
-                                    val annotated = buildAnnotatedString {
-                                        val prefix = summary.removeSuffix(" · $verdict")
-                                        append(prefix)
-                                        if (prefix != summary) {
-                                            append(" · ")
-                                            pushStyle(
-                                                SpanStyle(
-                                                    color = if (snap.isLossless) {
-                                                        MaterialTheme.colorScheme.primary
-                                                    } else {
-                                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                                    },
-                                                ),
-                                            )
-                                            append(verdict)
-                                            pop()
-                                        }
-                                    }
-                                    Text(
-                                        text = annotated,
-                                        style = nerdStyle,
-                                        color = Color.White.copy(alpha = 0.65f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -1276,6 +1247,118 @@ fun NowPlayingScreen(
                     ?.takeIf { !scrubbing && it.end > it.start }
                     ?.let { it.start..it.end },
             )
+            // Stats + quality picker under the seek bar: one tap opens the
+            // tier list, another closes it. AUTO derives the tier from the
+            // network monitor; lossless tiers are always manual-only.
+            var showTierPicker by remember { mutableStateOf(false) }
+            val autoOn by AppSettings.autoQuality.collectAsStateWithLifecycle()
+            val manualTier by AppSettings.audioTier.collectAsStateWithLifecycle()
+            val netClass by NetworkQualityMonitor.effective.collectAsStateWithLifecycle()
+            val effectiveTier = when (netClass) {
+                NetworkQualityMonitor.QualityClass.VERY_FAST,
+                NetworkQualityMonitor.QualityClass.FAST -> AudioTier.HIGH
+                NetworkQualityMonitor.QualityClass.MEDIUM -> AudioTier.NORMAL
+                NetworkQualityMonitor.QualityClass.SLOW -> AudioTier.LOW
+                else -> AudioTier.VERY_LOW
+            }
+            val haptics = LocalHapticFeedback.current
+            nerdStats?.let { snap ->
+                snap.summaryLine()?.let { summary ->
+                    val verdict = if (snap.isLossless) "Lossless" else "Lossy"
+                    val annotated = buildAnnotatedString {
+                        val prefix = summary.removeSuffix(" · $verdict")
+                        append(prefix)
+                        if (prefix != summary) {
+                            append(" · ")
+                            pushStyle(SpanStyle(color = if (snap.isLossless) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant))
+                            append(verdict)
+                            pop()
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showTierPicker = !showTierPicker
+                            }
+                            .padding(horizontal = PLAYER_GUTTER, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = annotated,
+                            style = nerdStyle,
+                            color = Color.White.copy(alpha = 0.65f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = if (autoOn) "Auto · ${effectiveTier.label}" else manualTier.label,
+                            style = nerdStyle,
+                            color = Color.White.copy(alpha = 0.65f),
+                        )
+                    }
+                    AnimatedVisibility(visible = showTierPicker) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                .padding(vertical = 4.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        AppSettings.setAutoQuality(true)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Text(
+                                    text = "Auto",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (autoOn) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (autoOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = effectiveTier.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            AudioTier.entries.forEach { tier ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            AppSettings.setAutoQuality(false)
+                                            AppSettings.setAudioTier(tier)
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                ) {
+                                    Text(
+                                        text = tier.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (!autoOn && manualTier == tier) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (!autoOn && manualTier == tier) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = tier.detail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             val losslessOn by AppSettings.losslessAudio.collectAsStateWithLifecycle()
             val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
             val cellularQuality by AppSettings.audioQualityCellular.collectAsStateWithLifecycle()

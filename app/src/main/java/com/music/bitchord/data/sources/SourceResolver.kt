@@ -61,6 +61,19 @@ object SourceResolver {
      * the one being undone is the one attached to a bill.
      */
     fun requestForNow(): StreamRequest {
+        // AUTO: the network monitor's hysteresis-stable class picks among the
+        // COMPRESSED tiers only. Lossless tiers are opt-in — they are never
+        // selected automatically, so a data plan can't be silently drained.
+        if (AppSettings.autoQuality.value) {
+            return when (NetworkQualityMonitor.effective.value) {
+                com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.VERY_FAST,
+                com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.FAST,
+                -> StreamRequest.Best
+                com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.MEDIUM -> StreamRequest.Capped(256)
+                com.music.bitchord.data.network.NetworkQualityMonitor.QualityClass.SLOW -> StreamRequest.Capped(128)
+                else -> StreamRequest.Capped(64)
+            }
+        }
         val ceiling = AppSettings.effectiveAudioQuality
         return when {
             ceiling != AudioQuality.HIGH -> StreamRequest.Capped(ceiling.maxKbps)

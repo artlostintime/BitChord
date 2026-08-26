@@ -15,6 +15,7 @@ import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.playback.DolbyAtmos
 import com.music.bitchord.playback.LastPlayed
 import com.music.bitchord.data.innertube.Innertube
+import com.music.bitchord.data.network.NetworkQualityMonitor
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.SearchHistory
@@ -38,6 +39,9 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         // and turning one of those back into a playable item needs the registry
         // that knows which source it belongs to.
         SourceRegistry.init(this)
+        // AUTO audio quality needs the live network class; the monitor is a
+        // process-wide singleton that no-ops until something reads its flows.
+        NetworkQualityMonitor.start(this)
         SearchHistory.init(this)
         LastPlayed.init(this)
         // What's already saved to Downloads, so the song menu can say so

@@ -130,6 +130,14 @@ object AppSettings {
      */
     val audioTier = MutableStateFlow(AudioTier.HIGH)
 
+    /** When true, NetworkQualityMonitor picks the tier instead of [audioTier]. */
+    val autoQuality = MutableStateFlow(false)
+
+    fun setAutoQuality(value: Boolean) {
+        autoQuality.value = value
+        prefs.edit().putBoolean(KEY_AUTO_QUALITY, value).apply()
+    }
+
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
 
@@ -403,6 +411,7 @@ object AppSettings {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
         pureBlack.value = prefs.getBoolean(KEY_PURE_BLACK, false)
+        autoQuality.value = prefs.getBoolean(KEY_AUTO_QUALITY, false)
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
@@ -883,6 +892,7 @@ object AppSettings {
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_PURE_BLACK = "pure_black"
+    private const val KEY_AUTO_QUALITY = "auto_quality"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
