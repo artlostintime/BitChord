@@ -1982,12 +1982,13 @@ private fun LyricsPanel(
         return
     }
 
-    // Karaoke palette: the line being sung is the brand primary and bold;
-    // every other line is the surface's muted variant at 40%, brightening
-    // to near-full while the user is browsing the list by hand.
-    val primary = MaterialTheme.colorScheme.primary
+    // Karaoke palette: the line being sung rides on a frosted-glass pill and
+    // swells slightly, while every other line is the surface's muted variant
+    // at 60% (softer than the old 40%), brightening to near-full while the
+    // user is browsing the list by hand. Colour eases between lines rather
+    // than snapping, so a line change reads as a cross-fade.
     val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-        alpha = if (browsing) 0.85f else 0.4f,
+        alpha = if (browsing) 0.85f else 0.6f,
     )
 
     LazyColumn(
@@ -2008,8 +2009,18 @@ private fun LyricsPanel(
         itemsIndexed(lines) { index, line ->
             val distance = if (activeLine < 0) 0 else abs(index - activeLine)
             val isActive = index == activeLine
-            val lineColor = if (isActive) primary else dim
-            val fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+            // Smooth colour handover: the line that just stopped being sung
+            // eases back to dim rather than snapping, and the new active line
+            // eases up — so a line change reads as a cross-fade, not a cut.
+            val lineColor by animateColorAsState(
+                targetValue = if (isActive) {
+                    MaterialTheme.colorScheme.onBackground
+                } else {
+                    dim
+                },
+                animationSpec = tween(durationMillis = 300),
+                label = "lyricColor",
+            )
             // Unbounded, and ahead of the clip: the default edge treatment cuts
             // the blur off at the line's own box, which put a hard edge down
             // either side of every out-of-focus line where the halo should have
@@ -2044,13 +2055,14 @@ private fun LyricsPanel(
                 val style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 27.sp,
                     lineHeight = 33.sp,
-                    fontWeight = fontWeight,
+                    fontWeight = FontWeight.Normal,
                 )
-                // The playing line swells a touch. Anchored to its left edge,
-                // so the words don't slide sideways under the highlight as it
-                // grows — scaling about the centre would fight the sweep.
+                // The playing line swells a touch and rides on a frosted pill.
+                // Anchored to its left edge, so the words don't slide sideways
+                // under the highlight as it grows — scaling about the centre
+                // would fight the sweep.
                 val scale by animateFloatAsState(
-                    targetValue = if (isActive) 1.04f else 1f,
+                    targetValue = if (isActive) 1.06f else 1f,
                     label = "lyricScale",
                 )
                 // Apple's bloom on the line being sung. Fades in and out with
@@ -2071,35 +2083,60 @@ private fun LyricsPanel(
                     .blur(blur, BlurredEdgeTreatment.Unbounded)
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onSeekToLine(line.timeMs) }
-                if (line.isWordSynced && !browsing) {
-                    // Every word-synced line goes through the sweep, not just
-                    // the playing one — a line that has already been sung is
-                    // fully revealed and one still to come is not, which falls
-                    // out of the same arithmetic.
-                    //
-                    // Running it only on the active line meant swapping this
-                    // composable for a plain Text the instant a line handed
-                    // over, and the two disagreed about the brightness of the
-                    // words: the tail of the line popped up to meet the rest of
-                    // it in a single frame. Animating the tail instead lets a
-                    // finished line close up as it dims away.
-                    SweptLyricLine(
-                        line = line,
-                        clock = clock,
-                        style = style,
-                        color = lineColor,
-                        dimColor = dim,
-                        modifier = shape,
-                        glowAlpha = glow,
-                        glowRoom = GLOW_ROOM,
-                    )
-                } else {
-                    Text(
-                        text = line.text,
-                        style = style,
-                        color = lineColor,
-                        modifier = shape.padding(GLOW_ROOM),
-                    )
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    if (isActive) {
+                        // Frosted-glass magnifier: a soft, blurred translucent
+                        // pill behind the active line. The player has no
+                        // backdrop HazeState to sample, so the frost is a
+                        // self-contained fill that reads as glass over the
+                        // gradient behind it — the same look without threading
+                        // a HazeState through the sheet.
+                        // ponytail: true backdrop blur would need a hazeSource
+                        // on the player root; the fill+blur pill is the same
+                        // look without the wiring.
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .padding(horizontal = GLOW_ROOM)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.surface
+                                        .copy(alpha = 0.42f),
+                                )
+                                .blur(7.dp, BlurredEdgeTreatment.Unbounded),
+                        )
+                    }
+                    if (line.isWordSynced && !browsing) {
+                        // Every word-synced line goes through the sweep, not
+                        // just the playing one — a line that has already been
+                        // sung is fully revealed and one still to come is not,
+                        // which falls out of the same arithmetic.
+                        //
+                        // Running it only on the active line meant swapping
+                        // this composable for a plain Text the instant a line
+                        // handed over, and the two disagreed about the
+                        // brightness of the words: the tail of the line popped
+                        // up to meet the rest of it in a single frame.
+                        // Animating the tail instead lets a finished line
+                        // close up as it dims away.
+                        SweptLyricLine(
+                            line = line,
+                            clock = clock,
+                            style = style,
+                            color = lineColor,
+                            dimColor = dim,
+                            modifier = shape,
+                            glowAlpha = glow,
+                            glowRoom = GLOW_ROOM,
+                        )
+                    } else {
+                        Text(
+                            text = line.text,
+                            style = style,
+                            color = lineColor,
+                            modifier = shape.padding(GLOW_ROOM),
+                        )
+                    }
                 }
             }
         }
@@ -2181,14 +2218,13 @@ private fun CurrentLyricLine(
             )
             Spacer(Modifier.width(6.dp))
         }
-        val primary = MaterialTheme.colorScheme.primary
         val swept = current?.takeIf { !instrumental && it.isWordSynced }
         if (swept != null) {
             SweptLyricLine(
                 line = swept,
                 clock = clock,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = primary,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal),
+                color = MaterialTheme.colorScheme.onBackground,
                 dimColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2197,8 +2233,8 @@ private fun CurrentLyricLine(
         } else {
             Text(
                 text = text,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = primary,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal),
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
