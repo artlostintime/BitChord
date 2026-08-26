@@ -1306,58 +1306,35 @@ fun NowPlayingScreen(
             }
             val haptics = LocalHapticFeedback.current
             nerdStats?.let { snap ->
-                snap.summaryLine()?.let { summary ->
-                    val verdict = if (snap.isLossless) "Lossless" else "Lossy"
-                    // "Stream" labels the live codec stats so they don't read
-                    // as a contradiction with the quality selector beside them:
-                    // the selector is the *preference*, this is what's actually
-                    // playing right now. Rendered in a distinct muted tone so
-                    // it acts as a category tag, not a data field.
-                    val annotated = buildAnnotatedString {
-                        pushStyle(SpanStyle(
-                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
-                            letterSpacing = 1.2.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.40f),
-                        ))
-                        append("STREAM  ")
-                        pop()
-                        val prefix = summary.removeSuffix(" · $verdict")
-                        append(prefix)
-                        if (prefix != summary) {
-                            append(" · ")
-                            pushStyle(SpanStyle(color = if (snap.isLossless) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassSecondaryAlpha)))
-                            append(verdict)
-                            pop()
+                val verdict = if (snap.isLossless) "Lossless" else "Lossy"
+                // Minimal: codec + verdict only. Full detail lives in Info.
+                val codec = snap.summaryLine()?.substringBefore(" · ") ?: return@let
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(GlassSurface)
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showTierPicker = !showTierPicker
                         }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(GlassSurface)
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showTierPicker = !showTierPicker
-                            }
-                            .padding(horizontal = PLAYER_GUTTER, vertical = 8.dp),
-                    ) {
-                        Text(
-                            text = annotated,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "Quality · " + if (autoOn) "Auto" else manualTier.label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
-                        )
-                    }
-                    AnimatedVisibility(visible = showTierPicker) {
+                        .padding(horizontal = PLAYER_GUTTER, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = "$codec · $verdict",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = GlassSecondaryAlpha),
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = if (autoOn) "Auto" else manualTier.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (snap.isLossless) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassSecondaryAlpha),
+                    )
+                }
+            }
+            AnimatedVisibility(visible = showTierPicker) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
