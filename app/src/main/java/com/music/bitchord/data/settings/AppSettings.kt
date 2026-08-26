@@ -53,7 +53,7 @@ enum class AudioTier(val label: String, val detail: String) {
     LOSSLESS("Lossless", "16-bit/44.1 kHz FLAC"),
     HIGH("High", "AAC 256 kbps"),
     NORMAL("Normal", "~128 kbps Opus"),
-    LOW("Low", "~64 kbps Opus"),
+    LOW("Low", "~64 kbps Opus");
 
     /** Whether this tier must only ever resolve to a bit-exact stream. */
     val isLossless: Boolean

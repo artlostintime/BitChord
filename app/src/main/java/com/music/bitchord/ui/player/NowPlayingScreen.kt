@@ -1306,7 +1306,7 @@ fun NowPlayingScreen(
                 NetworkQualityMonitor.QualityClass.FAST -> AudioTier.HIGH
                 NetworkQualityMonitor.QualityClass.MEDIUM -> AudioTier.NORMAL
                 NetworkQualityMonitor.QualityClass.SLOW -> AudioTier.LOW
-                else -> AudioTier.VERY_LOW
+                else -> AudioTier.LOW
             }
             val haptics = LocalHapticFeedback.current
             nerdStats?.let { snap ->
@@ -1350,7 +1350,7 @@ fun NowPlayingScreen(
                             onDismissRequest = { showTierPicker = false },
                             properties = PopupProperties(focusable = true),
                         ) {
-                            AnimatedVisibility(visible = true) {
+                            androidx.compose.animation.AnimatedVisibility(visible = true) {
                                 Column(
                                     modifier = Modifier
                                         .width(PLAYER_MAX_WIDTH)
@@ -1634,7 +1634,6 @@ fun NowPlayingScreen(
             }
 
             Spacer(Modifier.height(18.dp))
-            }
             }
             }
         }
