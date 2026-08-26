@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main, feat/spotify-playlist-import, feat/extension-support]
+    branches: [main, dev, feat/spotify-playlist-import, feat/extension-support]
     tags: ['v*']
   workflow_dispatch:
 
