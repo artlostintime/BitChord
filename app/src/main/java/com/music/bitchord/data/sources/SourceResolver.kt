@@ -194,7 +194,7 @@ object SourceResolver {
         // rather than the first that happens to match — see [score]. When
         // lossless was asked for this includes lossless-capable sources the
         // user hasn't reordered above YouTube (see [substitutionSources]).
-        val ranked = rankedCandidates(target, request, substitutionSources(active, request))
+        val ranked = rankedCandidates(target, request, substitutionSources(active))
         val best = ranked.firstOrNull() ?: return null
         // Says what was found, not what the caller will do with it. This line
         // used to read "substituted" unconditionally, including for streams the
@@ -279,7 +279,7 @@ object SourceResolver {
         if (request !is StreamRequest.Lossless) return null
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
-        for (source in substitutionSources(active, request)) {
+        for (source in substitutionSources(active)) {
             if (!source.kind.canServeLossless) continue
             val stream = matchAndStream(
                 source, target, request, waitForAll = true, strictLength = true,
@@ -345,7 +345,7 @@ object SourceResolver {
         // an absent YouTube means everything enabled outranks it, which is
         // already what [rankedAbove] says about a config that isn't in the list.
         val youtubeId = active.firstOrNull { it.kind == SourceKind.YOUTUBE }?.configId
-        for (source in substitutionSources(active, StreamRequest.Lossless)) {
+        for (source in substitutionSources(active)) {
             if (!source.kind.canServeLossless) continue
             val stream = matchAndStream(
                 source,
@@ -393,19 +393,23 @@ object SourceResolver {
      * How good a pick [stream] from [source] is, for [target] under [request].
      *
      * Four things, in descending weight:
-     *  - **User source order** — a source ranked higher in [SourceRegistry.active]
-     *    scores higher. This is the user's stated preference, and it dominates
-     *    bitrate differences within a quality tier.
-     *  - **Audio quality** — a lossless codec dominates unless lossless wasn't
-     *    asked for (then codec/bitrate decide), so a FLAC still wins when the
-     *    user turned lossless on, but a higher-ranked lossy source can win when
-     *    they didn't.
+     *  - **Audio quality** — the dominant term. A lossless codec dominates
+     *    unless lossless wasn't asked for (then codec/bitrate decide), and
+     *    among lossy streams the bitrate is scored directly, so a 320 kbps
+     *    source beats a 128 kbps one regardless of where either sits in the
+     *    user's source list.
+     *  - **User source order** — [PREF_WEIGHT] per rank step, a near-tie
+     *    breaker only. It no longer outweighs a real bitrate difference; rank
+     *    decides only between sources of effectively equal quality.
      *  - **Match confidence** — [TrackMatcher]'s score on the row that produced
      *    the stream, a minor tiebreaker.
-     *  - **Availability/health** — recent failures for the source are penalised.
+     *  - **Availability/health** — recent failures for the source are penalised
+     *    heavily (see [HEALTH_WEIGHT]), because a source that just threw is less
+     *    likely to be the best pick next time.
      *
-     * ponytail: a linear weighted sum, not a trained ranker. Weights are
-     * heuristic; tune the `*_WEIGHT` constants if the ordering surprises.
+     * ponytail: a linear weighted sum, not a trained ranker. Quality is the
+     * primary term and rank only a near-tie breaker ([PREF_WEIGHT] is small by
+     * design); tune the `*_WEIGHT` constants if the ordering surprises.
      */
     private fun score(
         source: MusicSource,
@@ -428,7 +432,7 @@ object SourceResolver {
         val bonus = if (lossless) {
             if (request is StreamRequest.Lossless) LOSSLESS_BONUS else LOSSLESS_PLAIN_BONUS
         } else 0
-        return bonus + (stream.format.kbps ?: 0) / 100
+        return bonus + (stream.format.kbps ?: 0)
     }
 
     /**
@@ -462,7 +466,7 @@ object SourceResolver {
         return scored.sortedByDescending { it.second }.map { it.first }
     }
 
-    private const val PREF_WEIGHT = 10_000
+    private const val PREF_WEIGHT = 20
     private const val LOSSLESS_BONUS = 1_000_000
     private const val LOSSLESS_PLAIN_BONUS = 500
     private const val HEALTH_WEIGHT = 5_000
@@ -525,23 +529,20 @@ object SourceResolver {
             .let { active.take(it) }
 
     /**
-     * Sources worth asking to stand in for YouTube, in priority order.
+     * Every enabled source that could stand in for YouTube, in no particular
+     * order — they compete on [score], which is quality-first (see [score]).
      *
-     * Normally only those the user ranked above YouTube — see [rankedAbove].
-     * But when lossless was asked for, a lossless-capable source the user
-     * hasn't reordered above YouTube still beats YouTube's lossy Opus, so it
-     * is appended. Without this, installing a Qobuz/Tidal extension or
-     * enabling Offline Mode and turning lossless on did nothing: those kinds
-     * sit below YouTube in the default [SourceKind] ordinal order, so they
-     * were never consulted and every track fell through to YouTube Opus.
+     * The old behaviour restricted this to sources the user had reordered
+     * above YouTube ([rankedAbove]); that made a lossless-capable extension or
+     * Offline Mode installed below YouTube invisible to substitution, and let
+     * source rank outweigh audio quality entirely. Rank is now only a
+     * near-tie breaker (see [PREF_WEIGHT]); every non-YouTube source is a
+     * candidate and the best stream by quality wins. YouTube itself is
+     * excluded — it is the thing being substituted, never a substitute for
+     * itself.
      */
-    private fun substitutionSources(active: List<MusicSource>, request: StreamRequest): List<MusicSource> {
-        val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return emptyList()
-        val above = rankedAbove(youtube.configId, active)
-        if (request !is StreamRequest.Lossless) return above
-        val aboveIds = above.map { it.configId }.toSet()
-        val losslessElsewhere = active.filter { it.kind.canServeLossless && it.configId !in aboveIds }
-        return above + losslessElsewhere
+    private fun substitutionSources(active: List<MusicSource>): List<MusicSource> {
+        return active.filter { it.kind != SourceKind.YOUTUBE }
     }
 
     /**
