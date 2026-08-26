@@ -284,6 +284,18 @@ private const val GLOW_TRAIL_FLOOR = 0.55f
  */
 private val GLOW_ROOM = 10.dp
 
+// ---- Glass material tokens (Apple Liquid Glass aesthetic) ----
+// One shared language for every translucent surface on the player:
+// stats row, quality selector, more-menu disc, lyrics pill, etc.
+/** Background tint for compact glass surfaces (stats row, pills, glyphs). */
+private val GlassSurface = Color.Black.copy(alpha = 0.28f)
+/** Background tint for expanded glass panels (quality selector dropdown). */
+private val GlassPanel = Color.Black.copy(alpha = 0.35f)
+/** Primary text on glass surfaces — crisp but not glaring. */
+private const val GlassTextAlpha = 0.90f
+/** Secondary / label text on glass surfaces. */
+private const val GlassSecondaryAlpha = 0.60f
+
 /** Stands in for an instrumental stretch on the single-line strip. */
 private const val INSTRUMENTAL_MARK = "Instrumental"
 
@@ -800,6 +812,37 @@ fun NowPlayingScreen(
             }
         }
 
+        // Adaptive vertical scrims: guarantee contrast for all text-critical
+        // zones regardless of the artwork or mesh gradient behind them.
+        // Top covers the title/artist; bottom covers the lyrics strip,
+        // scrubber, stats, controls and toggles. Strong enough that bright
+        // artwork (white sleeves, pale skies, neon art) never washes out
+        // white text, while dark art still looks natural beneath them.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.55f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(460.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.68f),
+                    ),
+                ),
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1098,7 +1141,7 @@ fun NowPlayingScreen(
                                 fontWeight = FontWeight.W500,
                                 fontSize = titleSize,
                             ),
-                            color = Color.White.copy(alpha = 0.55f),
+                            color = Color.White.copy(alpha = 0.70f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.opensPage(song.artistId, onOpenArtist),
@@ -1265,12 +1308,25 @@ fun NowPlayingScreen(
             nerdStats?.let { snap ->
                 snap.summaryLine()?.let { summary ->
                     val verdict = if (snap.isLossless) "Lossless" else "Lossy"
+                    // "Stream" labels the live codec stats so they don't read
+                    // as a contradiction with the quality selector beside them:
+                    // the selector is the *preference*, this is what's actually
+                    // playing right now. Rendered in a distinct muted tone so
+                    // it acts as a category tag, not a data field.
                     val annotated = buildAnnotatedString {
+                        pushStyle(SpanStyle(
+                            fontSize = MaterialTheme.typography.labelSmall.fontSize,
+                            letterSpacing = 1.2.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.40f),
+                        ))
+                        append("STREAM  ")
+                        pop()
                         val prefix = summary.removeSuffix(" · $verdict")
                         append(prefix)
                         if (prefix != summary) {
                             append(" · ")
-                            pushStyle(SpanStyle(color = if (snap.isLossless) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant))
+                            pushStyle(SpanStyle(color = if (snap.isLossless) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassSecondaryAlpha)))
                             append(verdict)
                             pop()
                         }
@@ -1278,26 +1334,27 @@ fun NowPlayingScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(GlassSurface)
                             .clickable {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 showTierPicker = !showTierPicker
                             }
-                            .padding(horizontal = PLAYER_GUTTER, vertical = 6.dp),
+                            .padding(horizontal = PLAYER_GUTTER, vertical = 8.dp),
                     ) {
                         Text(
                             text = annotated,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.65f),
+                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            text = if (autoOn) "Auto · ${effectiveTier.label}" else manualTier.label,
+                            text = "Quality · " + if (autoOn) "Auto" else manualTier.label,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.65f),
+                            color = Color.White.copy(alpha = GlassSecondaryAlpha),
                         )
                     }
                     AnimatedVisibility(visible = showTierPicker) {
@@ -1305,7 +1362,7 @@ fun NowPlayingScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                .background(GlassPanel)
                                 .padding(vertical = 4.dp),
                         ) {
                             Row(
@@ -1321,13 +1378,13 @@ fun NowPlayingScreen(
                                     text = "Auto",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = if (autoOn) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (autoOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    color = if (autoOn) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
                                     modifier = Modifier.weight(1f),
                                 )
                                 Text(
                                     text = effectiveTier.label,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = Color.White.copy(alpha = GlassSecondaryAlpha),
                                 )
                             }
                             AudioTier.entries.forEach { tier ->
@@ -1345,13 +1402,13 @@ fun NowPlayingScreen(
                                         text = tier.label,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = if (!autoOn && manualTier == tier) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (!autoOn && manualTier == tier) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        color = if (!autoOn && manualTier == tier) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = GlassTextAlpha),
                                         modifier = Modifier.weight(1f),
                                     )
                                     Text(
                                         text = tier.detail,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = Color.White.copy(alpha = GlassSecondaryAlpha),
                                     )
                                 }
                             }
@@ -1392,12 +1449,12 @@ fun NowPlayingScreen(
                     Text(
                         text = formatTime((shown * durationMs).toLong()),
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = Color.White.copy(alpha = 0.65f),
                     )
                     Text(
                         text = "-" + formatTime(durationMs - (shown * durationMs).toLong()),
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = Color.White.copy(alpha = 0.65f),
                     )
                 }
                 // Pinned to the box's own center rather than squeezed into the
@@ -1426,14 +1483,14 @@ fun NowPlayingScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(Color.White.copy(alpha = 0.10f))
+                        .background(GlassSurface)
                         .padding(horizontal = 18.dp, vertical = 8.dp),
                 ) {
                     Text(
                         text = lyricsSource?.let { "Lyrics by ${it.label}" }
                             ?: "No lyrics found",
                         style = MaterialTheme.typography.labelLarge,
-                        color = Color.White.copy(alpha = 0.7f),
+                        color = Color.White.copy(alpha = GlassTextAlpha),
                     )
                 }
                 Spacer(Modifier.height(20.dp))
@@ -1502,7 +1559,7 @@ fun NowPlayingScreen(
                     Icon(
                         Icons.AutoMirrored.Rounded.VolumeDown,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.5f),
+                        tint = Color.White.copy(alpha = GlassSecondaryAlpha),
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
@@ -1527,7 +1584,7 @@ fun NowPlayingScreen(
                     Icon(
                         Icons.AutoMirrored.Rounded.VolumeUp,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.5f),
+                        tint = Color.White.copy(alpha = GlassSecondaryAlpha),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -1976,7 +2033,7 @@ private fun LyricsPanel(
             Text(
                 text = "No lyrics for this track",
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.6f),
+                color = Color.White.copy(alpha = GlassTextAlpha),
             )
         }
         return
@@ -1988,7 +2045,7 @@ private fun LyricsPanel(
     // user is browsing the list by hand. Colour eases between lines rather
     // than snapping, so a line change reads as a cross-fade.
     val dim = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-        alpha = if (browsing) 0.85f else 0.6f,
+        alpha = if (browsing) 0.85f else 0.72f,
     )
 
     LazyColumn(
@@ -2086,23 +2143,18 @@ private fun LyricsPanel(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     if (isActive) {
                         // Frosted-glass magnifier: a soft, blurred translucent
-                        // pill behind the active line. The player has no
+                        // pill behind the active line. Uses the same glass
+                        // material family as the stats row, quality selector
+                        // and other player chrome — the player has no
                         // backdrop HazeState to sample, so the frost is a
                         // self-contained fill that reads as glass over the
-                        // gradient behind it — the same look without threading
-                        // a HazeState through the sheet.
-                        // ponytail: true backdrop blur would need a hazeSource
-                        // on the player root; the fill+blur pill is the same
-                        // look without the wiring.
+                        // gradient behind it.
                         Box(
                             modifier = Modifier
                                 .matchParentSize()
                                 .padding(horizontal = GLOW_ROOM)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    MaterialTheme.colorScheme.surface
-                                        .copy(alpha = 0.42f),
-                                )
+                                .background(GlassSurface)
                                 .blur(7.dp, BlurredEdgeTreatment.Unbounded),
                         )
                     }
@@ -2245,7 +2297,7 @@ private fun CurrentLyricLine(
         Icon(
             imageVector = BitChordIcons.ChevronRight,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.5f),
+            tint = Color.White.copy(alpha = GlassSecondaryAlpha),
             modifier = Modifier.size(14.dp),
         )
     }
@@ -2271,7 +2323,7 @@ private fun LyricsUnavailableLine(trackKey: Any, modifier: Modifier = Modifier) 
     Text(
         text = "Lyrics not available",
         style = MaterialTheme.typography.titleMedium,
-        color = Color.White,
+        color = Color.White.copy(alpha = GlassTextAlpha),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
@@ -2287,7 +2339,7 @@ private fun LyricsLoadingLine(trackKey: Any, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
-        color = Color.White.copy(alpha = 0.55f),
+        color = Color.White.copy(alpha = GlassSecondaryAlpha),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.padding(vertical = 4.dp),
@@ -2297,9 +2349,11 @@ private fun LyricsLoadingLine(trackKey: Any, modifier: Modifier = Modifier) {
 /**
  * Translucent circular button used for the track menu and the like control.
  *
- * [active] brightens the disc rather than only the glyph: this sits on album
- * artwork of any colour, and a white icon on a white-ish sleeve has no tint
- * change left to make. The filled heart carries the state as a shape too —
+ * Uses the shared glass material so it belongs to the same surface family as
+ * the stats row, quality selector, and other player chrome. [active] brightens
+ * the disc rather than only the glyph: this sits on album artwork of any
+ * colour, and a white icon on a white-ish sleeve has no tint change left to
+ * make. The filled heart carries the state as a shape too —
  * see [BitChordIcons.HeartFilled].
  */
 @Composable
@@ -2310,14 +2364,14 @@ private fun CircleGlyph(
     active: Boolean = false,
 ) {
     val discAlpha by animateFloatAsState(
-        targetValue = if (active) 0.34f else 0.18f,
+        targetValue = if (active) 0.42f else 0.28f,
         label = "glyphDisc",
     )
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = discAlpha))
+            .background(GlassSurface.copy(alpha = discAlpha))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -2328,7 +2382,7 @@ private fun CircleGlyph(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = Color.White,
+            tint = Color.White.copy(alpha = GlassTextAlpha),
             modifier = Modifier.size(19.dp),
         )
     }
@@ -2367,7 +2421,7 @@ private fun TransportGlyph(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = Color.White.copy(alpha = alpha),
+            tint = Color.White.copy(alpha = alpha * GlassTextAlpha),
             modifier = Modifier.size(size),
         )
     }
@@ -2385,7 +2439,7 @@ private fun BottomGlyph(
             .size(44.dp)
             .clip(CircleShape)
             .background(
-                if (highlighted) Color.White.copy(alpha = 0.20f) else Color.Transparent,
+                if (highlighted) GlassSurface.copy(alpha = 0.65f) else Color.Transparent,
             )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -2570,7 +2624,7 @@ private fun InlineQueue(
             Text(
                 text = "Clear",
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.75f),
+                color = Color.White.copy(alpha = GlassTextAlpha),
                 modifier = Modifier
                     .clip(RoundedCornerShape(percent = 50))
                     .clickable(onClick = onClear)
@@ -2631,7 +2685,7 @@ private fun InlineQueue(
                         Icon(
                             BitChordIcons.Infinity,
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.75f),
+                            tint = Color.White.copy(alpha = GlassTextAlpha),
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(8.dp))
@@ -2648,7 +2702,7 @@ private fun InlineQueue(
                                     "Similar music will keep playing"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.55f),
+                                color = Color.White.copy(alpha = GlassSecondaryAlpha),
                             )
                         }
                     }
@@ -2843,7 +2897,7 @@ private fun InlineQueueRow(
             Icon(
                 Icons.Rounded.DragHandle,
                 contentDescription = "Drag to reorder",
-                tint = Color.White.copy(alpha = 0.4f),
+                tint = Color.White.copy(alpha = GlassSecondaryAlpha),
                 modifier = Modifier
                     .size(20.dp)
                     // DragHandle's glyph sits well inset from the edges of
@@ -2885,7 +2939,7 @@ private fun InlineQueueRow(
             Text(
                 text = song.artist,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = GlassSecondaryAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2909,7 +2963,7 @@ private fun InlineQueueRow(
             Icon(
                 Icons.Rounded.Close,
                 contentDescription = "Remove from queue",
-                tint = Color.White.copy(alpha = 0.55f),
+                tint = Color.White.copy(alpha = GlassSecondaryAlpha),
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -2989,7 +3043,7 @@ private fun LosslessLabel(text: String, animated: Boolean, modifier: Modifier = 
         Icon(
             imageVector = Icons.Rounded.Headphones,
             contentDescription = null,
-            tint = Color.White.copy(alpha = if (animated) 0.7f else 0.45f),
+            tint = Color.White.copy(alpha = if (animated) GlassTextAlpha else GlassSecondaryAlpha),
             modifier = Modifier.size(13.dp),
         )
         Spacer(Modifier.width(4.dp))
@@ -3001,7 +3055,7 @@ private fun LosslessLabel(text: String, animated: Boolean, modifier: Modifier = 
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontSize = (MaterialTheme.typography.labelMedium.fontSize.value + 1).sp,
                 ),
-                color = Color.White.copy(alpha = 0.45f),
+                color = Color.White.copy(alpha = GlassSecondaryAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -3030,7 +3084,7 @@ private fun ShimmerText(text: String) {
         ),
         label = "lossless-shimmer-progress",
     )
-    val baseColor = Color.White.copy(alpha = 0.55f)
+    val baseColor = Color.White.copy(alpha = GlassTextAlpha)
     val brush = if (widthPx <= 0) {
         Brush.linearGradient(listOf(baseColor, baseColor))
     } else {
